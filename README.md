@@ -21,6 +21,7 @@ npm run dev
 ```bash
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_ANON_KEY=sua-chave-anon-publica
+VITE_OWNER_WHATSAPP=5511999999999
 ```
 
 Nunca coloque a `service_role key` no frontend.
@@ -28,6 +29,12 @@ Nunca coloque a `service_role key` no frontend.
 ## Fotos
 
 O jeito mais simples e seguro e subir as fotos no Supabase Storage, deixar o bucket publico ou gerar URLs publicas, e adicionar essas URLs pelo painel Admin do site.
+
+## WhatsApp e confirmacao
+
+Cadastre o WhatsApp do proprietario no painel Admin ou em `VITE_OWNER_WHATSAPP`.
+Quando o cliente solicita uma reserva, o site cria a reserva como `pending` e abre uma mensagem pronta no WhatsApp.
+Depois que voce aceitar, entre no Admin e clique em `Confirmar`; a reserva muda para `confirmed` e o calendario passa a bloquear essas datas.
 
 ## Pagamento
 

@@ -9,11 +9,15 @@ create table if not exists public.properties (
   max_guests integer not null default 1,
   bedrooms integer not null default 1,
   bathrooms integer not null default 1,
+  owner_whatsapp text,
   amenities text[] not null default '{}',
   rules text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.properties
+  add column if not exists owner_whatsapp text;
 
 create table if not exists public.property_photos (
   id uuid primary key default gen_random_uuid(),

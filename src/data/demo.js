@@ -10,6 +10,7 @@ export const demoProperty = {
   max_guests: 8,
   bedrooms: 3,
   bathrooms: 2,
+  owner_whatsapp: '',
   rules: ['Check-in a partir das 14h', 'Check-out ate 11h', 'Nao fumar dentro da casa'],
   amenities: ['Wi-Fi', 'Cozinha equipada', 'Churrasqueira', 'Estacionamento', 'Roupas de cama'],
 };

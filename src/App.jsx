@@ -9,6 +9,7 @@ import {
   Lock,
   MapPin,
   Menu,
+  MessageCircle,
   Save,
   ShieldCheck,
   Users,
@@ -37,6 +38,7 @@ const currency = new Intl.NumberFormat('pt-BR', {
 });
 
 const adminPin = '1234';
+const fallbackOwnerWhatsapp = import.meta.env.VITE_OWNER_WHATSAPP || '';
 
 function toDate(value) {
   return value ? parseISO(value) : null;
@@ -49,7 +51,7 @@ function dateKey(date) {
 function getBookedDates(reservations) {
   const booked = new Set();
   reservations
-    .filter((reservation) => ['pending', 'confirmed', 'blocked'].includes(reservation.status))
+    .filter((reservation) => ['confirmed', 'blocked'].includes(reservation.status))
     .forEach((reservation) => {
       const start = toDate(reservation.check_in);
       const end = addDays(toDate(reservation.check_out), -1);
@@ -66,7 +68,7 @@ function hasConflict(reservations, checkIn, checkOut) {
   if (!selectedStart || !selectedEnd) return false;
 
   return reservations
-    .filter((reservation) => ['pending', 'confirmed', 'blocked'].includes(reservation.status))
+    .filter((reservation) => ['confirmed', 'blocked'].includes(reservation.status))
     .some((reservation) => {
       const reservedStart = toDate(reservation.check_in);
       const reservedEnd = addDays(toDate(reservation.check_out), -1);
@@ -84,6 +86,38 @@ function buildCalendarDays(month) {
   return Array.from({ length: 42 }, (_, index) => addDays(firstVisible, index)).filter((day) =>
     isBefore(day, addDays(lastMonthDay, 14)),
   );
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function buildReservationMessage({ property, reservation, nights }) {
+  return [
+    `Nova solicitacao de reserva - ${property.name}`,
+    '',
+    `Nome: ${reservation.guest_name}`,
+    `Telefone: ${reservation.guest_phone}`,
+    `Email: ${reservation.guest_email}`,
+    reservation.guest_document ? `Documento: ${reservation.guest_document}` : null,
+    `Check-in: ${reservation.check_in}`,
+    `Check-out: ${reservation.check_out}`,
+    `Noites: ${nights}`,
+    `Hospedes: ${reservation.guests}`,
+    `Total estimado: ${currency.format(reservation.total_amount || 0)}`,
+    reservation.notes ? `Observacoes: ${reservation.notes}` : null,
+    '',
+    `Codigo da reserva: ${reservation.id}`,
+    'Aguardando confirmacao do proprietario.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildWhatsAppUrl(phone, message) {
+  const digits = onlyDigits(phone);
+  if (!digits) return '';
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
 function Button({ children, className = '', variant = 'primary', ...props }) {
@@ -141,6 +175,7 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminSession, setAdminSession] = useState(null);
   const [message, setMessage] = useState('');
+  const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState({
     check_in: '',
@@ -228,12 +263,29 @@ export default function App() {
         setMessage('Nao foi possivel criar a reserva agora. Confira os dados e tente novamente.');
         return;
       }
+      const whatsAppUrl = buildWhatsAppUrl(
+        property.owner_whatsapp || fallbackOwnerWhatsapp,
+        buildReservationMessage({ property, reservation: data, nights }),
+      );
+      setLastWhatsAppUrl(whatsAppUrl);
       setReservations((current) => [...current, data]);
+      if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
     } else {
-      setReservations((current) => [...current, { ...reservation, id: crypto.randomUUID() }]);
+      const localReservation = { ...reservation, id: crypto.randomUUID() };
+      const whatsAppUrl = buildWhatsAppUrl(
+        property.owner_whatsapp || fallbackOwnerWhatsapp,
+        buildReservationMessage({ property, reservation: localReservation, nights }),
+      );
+      setLastWhatsAppUrl(whatsAppUrl);
+      setReservations((current) => [...current, localReservation]);
+      if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
     }
 
-    setMessage('Reserva enviada. Voce recebera o link de pagamento para confirmar a estadia.');
+    setMessage(
+      property.owner_whatsapp || fallbackOwnerWhatsapp
+        ? 'Solicitacao criada e mensagem do WhatsApp preparada. A reserva fica pendente ate voce confirmar no Admin.'
+        : 'Solicitacao criada. Cadastre o WhatsApp do proprietario no Admin para enviar automaticamente.',
+    );
     setBooking({
       check_in: '',
       check_out: '',
@@ -513,8 +565,8 @@ export default function App() {
                 </p>
               ) : null}
               <Button className="w-full sm:w-fit" type="submit" disabled={!canBook}>
-                <Lock size={18} />
-                Enviar reserva
+                <MessageCircle size={18} />
+                Solicitar pelo WhatsApp
               </Button>
             </form>
 
@@ -529,9 +581,20 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-6 rounded-md bg-white p-4 text-sm leading-6 text-ink/70">
-                Depois do envio, a reserva fica pendente ate confirmacao e pagamento.
+                Depois do envio pelo WhatsApp, a reserva fica pendente ate confirmacao do proprietario.
               </div>
               {message ? <p className="mt-4 rounded-md bg-mist px-4 py-3 text-sm font-semibold">{message}</p> : null}
+              {lastWhatsAppUrl ? (
+                <a
+                  className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-leaf px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#285f42]"
+                  href={lastWhatsAppUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MessageCircle size={18} />
+                  Abrir WhatsApp
+                </a>
+              ) : null}
             </aside>
           </div>
         </section>
@@ -775,6 +838,13 @@ function AdminPanel({
                 <Field label="Cidade">
                   <TextInput value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value })} />
                 </Field>
+                <Field label="WhatsApp do proprietario">
+                  <TextInput
+                    value={draft.owner_whatsapp || ''}
+                    onChange={(event) => setDraft({ ...draft, owner_whatsapp: event.target.value })}
+                    placeholder="5511999999999"
+                  />
+                </Field>
                 <Field label="Diaria">
                   <TextInput
                     type="number"
@@ -867,13 +937,30 @@ function AdminPanel({
                       <div>
                         <p className="font-black">{reservation.guest_name}</p>
                         <p className="text-sm text-ink/65">
-                          {reservation.check_in} ate {reservation.check_out} · {reservation.guests} hospede(s)
+                          {reservation.check_in} ate {reservation.check_out} - {reservation.guests} hospede(s)
                         </p>
                         <p className="mt-1 text-sm font-semibold">
-                          {currency.format(reservation.total_amount || 0)} · {reservation.status}
+                          {currency.format(reservation.total_amount || 0)} - {reservation.status}
+                        </p>
+                        <p className="mt-1 text-sm text-ink/65">
+                          {reservation.guest_phone || reservation.guest_email}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        {reservation.guest_phone ? (
+                          <a
+                            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-ink/15 bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-mist"
+                            href={buildWhatsAppUrl(
+                              reservation.guest_phone,
+                              `Ola, ${reservation.guest_name}. Sua reserva em ${property.name} foi confirmada para ${reservation.check_in} ate ${reservation.check_out}.`,
+                            )}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <MessageCircle size={16} />
+                            WhatsApp
+                          </a>
+                        ) : null}
                         <Button
                           variant="outline"
                           onClick={() => updateReservationStatus(reservation.id, 'confirmed')}
