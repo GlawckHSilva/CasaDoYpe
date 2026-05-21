@@ -25,6 +25,12 @@ VITE_OWNER_WHATSAPP=5511999999999
 ```
 
 Nunca coloque a `service_role key` no frontend.
+Para pagamentos online, configure estes segredos na Edge Function do Supabase, nao no `.env` do React:
+
+```bash
+supabase secrets set MERCADO_PAGO_ACCESS_TOKEN=seu-access-token
+supabase functions deploy create-payment-preference
+```
 
 ## Fotos
 
@@ -38,7 +44,17 @@ Depois que voce aceitar, entre no Admin e clique em `Confirmar`; a reserva muda 
 
 ## Pagamento
 
-O app ja calcula o total e cria a reserva como pendente. Para pagamento real por Pix/cartao, conecte um provedor como Mercado Pago, Stripe ou PagSeguro usando uma API/Edge Function no backend. Nao processe cartao direto no navegador.
+O app calcula o total e cria a reserva como pendente. Para Pix/cartao, a Edge Function `supabase/functions/create-payment-preference` cria um link do Mercado Pago e salva esse link na reserva. Para dinheiro e cheque, marque o recebimento manualmente no Admin.
+
+Fluxo recomendado:
+
+1. Cliente escolhe Pix, cartao, dinheiro ou cheque.
+2. O site envia a solicitacao pelo WhatsApp.
+3. Para Pix/cartao, a mensagem inclui o link de pagamento quando a Edge Function estiver configurada.
+4. Para dinheiro/cheque, voce recebe em maos e clica em `Recebido`.
+5. O painel `Caixa` mostra recebido, a receber e previsao.
+
+Nao processe cartao direto no navegador.
 
 ## Publicar no GitHub
 

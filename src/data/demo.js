@@ -57,6 +57,7 @@ export const demoReservations = [
     total_amount: 2080,
     status: 'confirmed',
     payment_status: 'paid',
+    payment_method: 'pix',
   },
   {
     id: 'reserva-demo-2',
@@ -68,5 +69,6 @@ export const demoReservations = [
     total_amount: 0,
     status: 'blocked',
     payment_status: 'not_required',
+    payment_method: 'cash',
   },
 ];

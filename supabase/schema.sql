@@ -41,14 +41,33 @@ create table if not exists public.reservations (
   total_amount numeric(10, 2) not null default 0,
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'cancelled', 'blocked')),
   payment_status text not null default 'pending' check (payment_status in ('pending', 'paid', 'failed', 'refunded', 'not_required')),
+  payment_method text not null default 'pix' check (payment_method in ('pix', 'card', 'cash', 'check')),
   payment_url text,
   notes text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.reservations
+  add column if not exists payment_method text not null default 'pix';
+
+create table if not exists public.cash_movements (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid not null references public.properties(id) on delete cascade,
+  reservation_id uuid references public.reservations(id) on delete set null,
+  type text not null default 'income' check (type in ('income', 'expense')),
+  status text not null default 'expected' check (status in ('expected', 'received', 'cancelled')),
+  payment_method text not null default 'cash' check (payment_method in ('pix', 'card', 'cash', 'check')),
+  amount numeric(10, 2) not null default 0,
+  due_date date not null default current_date,
+  paid_at timestamptz,
+  description text not null default '',
   created_at timestamptz not null default now()
 );
 
 alter table public.properties enable row level security;
 alter table public.property_photos enable row level security;
 alter table public.reservations enable row level security;
+alter table public.cash_movements enable row level security;
 
 create policy "Public can read properties"
   on public.properties for select
@@ -60,7 +79,7 @@ create policy "Public can read photos"
 
 create policy "Public can read unavailable reservation dates"
   on public.reservations for select
-  using (status in ('pending', 'confirmed', 'blocked'));
+  using (status in ('confirmed', 'blocked'));
 
 create policy "Guests can create reservation requests"
   on public.reservations for insert
@@ -78,6 +97,11 @@ create policy "Authenticated owners can manage photos"
 
 create policy "Authenticated owners can manage reservations"
   on public.reservations for all
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create policy "Authenticated owners can manage cash movements"
+  on public.cash_movements for all
   using (auth.role() = 'authenticated')
   with check (auth.role() = 'authenticated');
 

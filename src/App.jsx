@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   BedDouble,
+  Banknote,
   CalendarDays,
   Check,
   CreditCard,
@@ -39,6 +40,12 @@ const currency = new Intl.NumberFormat('pt-BR', {
 
 const adminPin = '1234';
 const fallbackOwnerWhatsapp = import.meta.env.VITE_OWNER_WHATSAPP || '';
+const paymentLabels = {
+  pix: 'Pix',
+  card: 'Cartao',
+  cash: 'Dinheiro',
+  check: 'Cheque',
+};
 
 function toDate(value) {
   return value ? parseISO(value) : null;
@@ -104,7 +111,9 @@ function buildReservationMessage({ property, reservation, nights }) {
     `Check-out: ${reservation.check_out}`,
     `Noites: ${nights}`,
     `Hospedes: ${reservation.guests}`,
+    `Pagamento: ${paymentLabels[reservation.payment_method] || 'A combinar'}`,
     `Total estimado: ${currency.format(reservation.total_amount || 0)}`,
+    reservation.payment_url ? `Link de pagamento: ${reservation.payment_url}` : null,
     reservation.notes ? `Observacoes: ${reservation.notes}` : null,
     '',
     `Codigo da reserva: ${reservation.id}`,
@@ -165,10 +174,22 @@ function TextArea(props) {
   );
 }
 
+function SelectInput({ children, ...props }) {
+  return (
+    <select
+      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-ink shadow-sm transition"
+      {...props}
+    >
+      {children}
+    </select>
+  );
+}
+
 export default function App() {
   const [property, setProperty] = useState(demoProperty);
   const [photos, setPhotos] = useState(demoPhotos);
   const [reservations, setReservations] = useState(demoReservations);
+  const [cashMovements, setCashMovements] = useState([]);
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [month, setMonth] = useState(new Date());
   const [adminOpen, setAdminOpen] = useState(false);
@@ -185,6 +206,7 @@ export default function App() {
     guest_email: '',
     guest_phone: '',
     guest_document: '',
+    payment_method: 'pix',
     notes: '',
   });
 
@@ -196,6 +218,16 @@ export default function App() {
   const subtotal = nights * Number(property.daily_rate || 0);
   const total = subtotal + (nights > 0 ? Number(property.cleaning_fee || 0) : 0);
   const reservationConflict = hasConflict(reservations, booking.check_in, booking.check_out);
+  const financialSummary = useMemo(() => {
+    const received = cashMovements
+      .filter((movement) => movement.type === 'income' && movement.status === 'received')
+      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const receivable = reservations
+      .filter((reservation) => ['pending', 'confirmed'].includes(reservation.status))
+      .filter((reservation) => reservation.payment_status !== 'paid')
+      .reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
+    return { received, receivable, forecast: received + receivable };
+  }, [cashMovements, reservations]);
   const canBook =
     nights > 0 &&
     !reservationConflict &&
@@ -212,16 +244,18 @@ export default function App() {
         return;
       }
 
-      const [{ data: propertyRows }, { data: photoRows }, { data: reservationRows }] =
+      const [{ data: propertyRows }, { data: photoRows }, { data: reservationRows }, { data: movementRows }] =
         await Promise.all([
           supabase.from('properties').select('*').limit(1),
           supabase.from('property_photos').select('*').order('sort_order'),
           supabase.from('reservations').select('*').order('check_in'),
+          supabase.from('cash_movements').select('*').order('due_date', { ascending: false }),
         ]);
 
       if (propertyRows?.[0]) setProperty(propertyRows[0]);
       if (photoRows?.length) setPhotos(photoRows);
       if (reservationRows?.length) setReservations(reservationRows);
+      if (movementRows?.length) setCashMovements(movementRows);
       setLoading(false);
     }
 
@@ -255,6 +289,7 @@ export default function App() {
       total_amount: total,
       status: 'pending',
       payment_status: 'pending',
+      payment_method: booking.payment_method,
     };
 
     if (hasSupabaseConfig) {
@@ -263,12 +298,13 @@ export default function App() {
         setMessage('Nao foi possivel criar a reserva agora. Confira os dados e tente novamente.');
         return;
       }
+      const payableReservation = await createPaymentLink(data);
       const whatsAppUrl = buildWhatsAppUrl(
         property.owner_whatsapp || fallbackOwnerWhatsapp,
-        buildReservationMessage({ property, reservation: data, nights }),
+        buildReservationMessage({ property, reservation: payableReservation, nights }),
       );
       setLastWhatsAppUrl(whatsAppUrl);
-      setReservations((current) => [...current, data]);
+      setReservations((current) => [...current, payableReservation]);
       if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
     } else {
       const localReservation = { ...reservation, id: crypto.randomUUID() };
@@ -294,8 +330,27 @@ export default function App() {
       guest_email: '',
       guest_phone: '',
       guest_document: '',
+      payment_method: 'pix',
       notes: '',
     });
+  }
+
+  async function createPaymentLink(reservation) {
+    if (!hasSupabaseConfig || !['pix', 'card'].includes(reservation.payment_method)) {
+      return reservation;
+    }
+
+    const { data, error } = await supabase.functions.invoke('create-payment-preference', {
+      body: {
+        reservationId: reservation.id,
+        propertyName: property.name,
+        payerEmail: reservation.guest_email,
+        amount: Number(reservation.total_amount || 0),
+      },
+    });
+
+    if (error || !data?.paymentUrl) return reservation;
+    return { ...reservation, payment_url: data.paymentUrl };
   }
 
   async function saveProperty(updated) {
@@ -342,6 +397,38 @@ export default function App() {
         .from('reservations')
         .update(updatePayload)
         .eq('id', id);
+    }
+  }
+
+  async function registerPayment(reservation, paymentStatus = 'paid') {
+    const paidAt = new Date().toISOString();
+    const movement = {
+      property_id: reservation.property_id,
+      reservation_id: reservation.id,
+      type: 'income',
+      status: paymentStatus === 'paid' ? 'received' : 'expected',
+      payment_method: reservation.payment_method || 'cash',
+      amount: Number(reservation.total_amount || 0),
+      due_date: format(new Date(), 'yyyy-MM-dd'),
+      paid_at: paymentStatus === 'paid' ? paidAt : null,
+      description: `Reserva ${reservation.guest_name}`,
+    };
+
+    setReservations((current) =>
+      current.map((item) =>
+        item.id === reservation.id
+          ? {
+              ...item,
+              payment_status: paymentStatus,
+            }
+          : item,
+      ),
+    );
+    setCashMovements((current) => [{ ...movement, id: crypto.randomUUID() }, ...current]);
+
+    if (hasSupabaseConfig) {
+      await supabase.from('reservations').update({ payment_status: paymentStatus }).eq('id', reservation.id);
+      await supabase.from('cash_movements').insert(movement);
     }
   }
 
@@ -551,6 +638,17 @@ export default function App() {
                     placeholder="CPF ou passaporte"
                   />
                 </Field>
+                <Field label="Forma de pagamento">
+                  <SelectInput
+                    value={booking.payment_method}
+                    onChange={(event) => setBooking({ ...booking, payment_method: event.target.value })}
+                  >
+                    <option value="pix">Pix</option>
+                    <option value="card">Cartao</option>
+                    <option value="cash">Dinheiro</option>
+                    <option value="check">Cheque</option>
+                  </SelectInput>
+                </Field>
               </div>
               <Field label="Observacoes">
                 <TextArea
@@ -576,6 +674,7 @@ export default function App() {
                 <SummaryRow label="Diarias" value={`${nights} noite(s)`} />
                 <SummaryRow label="Valor por diaria" value={currency.format(property.daily_rate)} />
                 <SummaryRow label="Limpeza" value={nights > 0 ? currency.format(property.cleaning_fee) : '-'} />
+                <SummaryRow label="Pagamento" value={paymentLabels[booking.payment_method]} />
                 <div className="mt-3 border-t border-ink/10 pt-4">
                   <SummaryRow label="Total estimado" value={currency.format(total)} strong />
                 </div>
@@ -616,6 +715,9 @@ export default function App() {
           onUnlock={(pin) => setAdminUnlocked(pin === adminPin)}
           property={property}
           reservations={reservations}
+          cashMovements={cashMovements}
+          financialSummary={financialSummary}
+          registerPayment={registerPayment}
           saveProperty={saveProperty}
           updateReservationStatus={updateReservationStatus}
         />
@@ -649,6 +751,20 @@ function SummaryRow({ label, value, strong = false }) {
     <div className={`flex items-center justify-between gap-4 ${strong ? 'text-lg font-black' : ''}`}>
       <span className="text-ink/65">{label}</span>
       <span className="font-bold">{value}</span>
+    </div>
+  );
+}
+
+function FinanceCard({ icon: Icon, label, value }) {
+  return (
+    <div className="rounded-md bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-3">
+        <span className="grid h-10 w-10 place-items-center rounded-md bg-mist text-leaf">
+          <Icon size={18} />
+        </span>
+        <span className="text-sm font-semibold text-ink/65">{label}</span>
+      </div>
+      <p className="mt-3 text-2xl font-black">{value}</p>
     </div>
   );
 }
@@ -719,9 +835,12 @@ function AdminPanel({
   addPhoto,
   adminUnlocked,
   adminSession,
+  cashMovements,
+  financialSummary,
   onClose,
   onUnlock,
   property,
+  registerPayment,
   reservations,
   saveProperty,
   updateReservationStatus,
@@ -829,6 +948,31 @@ function AdminPanel({
                 </Button>
               </div>
             ) : null}
+            <section className="grid gap-4">
+              <div>
+                <h3 className="text-xl font-black">Caixa</h3>
+                <p className="mt-1 text-sm text-ink/65">Acompanhe o que entrou e o que ainda tem para receber.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <FinanceCard icon={Banknote} label="Recebido" value={currency.format(financialSummary.received)} />
+                <FinanceCard icon={CreditCard} label="A receber" value={currency.format(financialSummary.receivable)} />
+                <FinanceCard icon={CalendarDays} label="Previsao" value={currency.format(financialSummary.forecast)} />
+              </div>
+              <div className="grid gap-2 rounded-md bg-white p-4 shadow-sm">
+                <p className="text-sm font-black">Ultimos lancamentos</p>
+                {cashMovements.length ? (
+                  cashMovements.slice(0, 5).map((movement) => (
+                    <div key={movement.id} className="flex items-center justify-between gap-4 text-sm">
+                      <span className="text-ink/70">{movement.description}</span>
+                      <span className="font-bold">{currency.format(movement.amount || 0)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-ink/60">Nenhum recebimento registrado ainda.</p>
+                )}
+              </div>
+            </section>
+
             <form className="grid gap-4" onSubmit={submitProperty}>
               <h3 className="text-xl font-black">Dados da casa</h3>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -943,6 +1087,10 @@ function AdminPanel({
                           {currency.format(reservation.total_amount || 0)} - {reservation.status}
                         </p>
                         <p className="mt-1 text-sm text-ink/65">
+                          {paymentLabels[reservation.payment_method] || 'A combinar'} -{' '}
+                          {reservation.payment_status === 'paid' ? 'pago' : 'a receber'}
+                        </p>
+                        <p className="mt-1 text-sm text-ink/65">
                           {reservation.guest_phone || reservation.guest_email}
                         </p>
                       </div>
@@ -968,6 +1116,12 @@ function AdminPanel({
                           <Check size={16} />
                           Confirmar
                         </Button>
+                        {reservation.payment_status !== 'paid' ? (
+                          <Button variant="secondary" onClick={() => registerPayment(reservation, 'paid')}>
+                            <Banknote size={16} />
+                            Recebido
+                          </Button>
+                        ) : null}
                         <Button
                           variant="outline"
                           onClick={() => updateReservationStatus(reservation.id, 'cancelled')}
