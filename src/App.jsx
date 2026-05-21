@@ -848,6 +848,7 @@ function AdminPanel({
   const [pin, setPin] = useState('');
   const [login, setLogin] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [loginNotice, setLoginNotice] = useState('');
   const [draft, setDraft] = useState({
     ...property,
     amenities: property.amenities?.join(', ') || '',
@@ -888,9 +889,17 @@ function AdminPanel({
             onSubmit={async (event) => {
               event.preventDefault();
               setLoginError('');
+              setLoginNotice('');
 
               if (hasSupabaseConfig) {
                 const { error } = await supabase.auth.signInWithPassword(login);
+                if (error?.message === 'Email not confirmed') {
+                  setLoginError('E-mail ainda nao confirmado.');
+                  setLoginNotice(
+                    'Abra o e-mail de confirmacao do Supabase. Se o link deu erro, confira a URL do site no Supabase Auth.',
+                  );
+                  return;
+                }
                 if (error) setLoginError('Login nao autorizado. Confira e-mail e senha.');
                 return;
               }
@@ -932,6 +941,31 @@ function AdminPanel({
               Entrar
             </Button>
             {loginError ? <p className="text-sm font-semibold text-red-700">{loginError}</p> : null}
+            {loginNotice ? <p className="text-sm leading-6 text-ink/70">{loginNotice}</p> : null}
+            {hasSupabaseConfig && login.email ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={async () => {
+                  setLoginError('');
+                  setLoginNotice('');
+                  const { error } = await supabase.auth.resend({
+                    type: 'signup',
+                    email: login.email,
+                    options: {
+                      emailRedirectTo: window.location.origin,
+                    },
+                  });
+                  if (error) {
+                    setLoginError('Nao foi possivel reenviar agora.');
+                    return;
+                  }
+                  setLoginNotice('Novo e-mail de confirmacao enviado.');
+                }}
+              >
+                Reenviar confirmacao
+              </Button>
+            ) : null}
             <p className="text-sm leading-6 text-ink/65">
               {hasSupabaseConfig
                 ? 'Use um usuario criado no Supabase Auth para administrar o site.'

@@ -16,7 +16,10 @@ npm run dev
 3. Crie pelo menos uma linha na tabela `properties`.
 4. Adicione fotos em `property_photos`, usando URLs publicas ou arquivos do Supabase Storage.
 5. Crie um usuario em Authentication para acessar a administracao.
-6. Copie `.env.example` para `.env` e preencha:
+6. Em Authentication > URL Configuration, configure:
+   - Site URL: `http://127.0.0.1:5173` em desenvolvimento, ou a URL publicada do site.
+   - Redirect URLs: `http://127.0.0.1:5173/**` e a URL publicada do site com `/**`.
+7. Copie `.env.example` para `.env` e preencha:
 
 ```bash
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co
