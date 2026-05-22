@@ -9,7 +9,9 @@ create table if not exists public.properties (
   max_guests integer not null default 1,
   bedrooms integer not null default 1,
   bathrooms integer not null default 1,
-  owner_whatsapp text,
+  owner_whatsapp text default '43998108328',
+  maps_url text,
+  theme_color text default '#2563eb',
   amenities text[] not null default '{}',
   rules text[] not null default '{}',
   created_at timestamptz not null default now(),
@@ -18,6 +20,19 @@ create table if not exists public.properties (
 
 alter table public.properties
   add column if not exists owner_whatsapp text;
+
+alter table public.properties
+  add column if not exists maps_url text;
+
+alter table public.properties
+  add column if not exists theme_color text default '#2563eb';
+
+alter table public.properties
+  alter column owner_whatsapp set default '43998108328';
+
+update public.properties
+  set owner_whatsapp = '43998108328'
+  where owner_whatsapp is null or owner_whatsapp = '';
 
 create table if not exists public.property_photos (
   id uuid primary key default gen_random_uuid(),

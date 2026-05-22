@@ -10,10 +10,14 @@ export const demoProperty = {
   max_guests: 8,
   bedrooms: 3,
   bathrooms: 2,
-  owner_whatsapp: '',
-  rules: ['Check-in a partir das 14h', 'Check-out ate 11h', 'Nao fumar dentro da casa'],
+  owner_whatsapp: '43998108328',
+  maps_url: '',
+  theme_color: '#2563eb',
+  rules: ['Check-in a partir das 14h', 'Check-out até 11h', 'Não fumar dentro da casa'],
   amenities: ['Wi-Fi', 'Cozinha equipada', 'Churrasqueira', 'Estacionamento', 'Roupas de cama'],
 };
+
+export const demoProperties = [demoProperty];
 
 export const demoPhotos = [
   {
@@ -62,7 +66,7 @@ export const demoReservations = [
   {
     id: 'reserva-demo-2',
     property_id: demoProperty.id,
-    guest_name: 'Bloqueio de manutencao',
+    guest_name: 'Bloqueio de manutenção',
     check_in: '2026-06-24',
     check_out: '2026-06-27',
     guests: 1,

@@ -4,17 +4,17 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['Poppins', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       colors: {
-        ink: '#17201a',
-        leaf: '#2f6f4e',
-        coral: '#d9654f',
-        mist: '#edf5ef',
-        sun: '#f5c66b',
+        ink: '#142033',
+        leaf: '#2563eb',
+        coral: '#0ea5e9',
+        mist: '#eaf3ff',
+        sun: '#93c5fd',
       },
       boxShadow: {
-        soft: '0 18px 45px rgba(23, 32, 26, 0.12)',
+        soft: '0 18px 45px rgba(20, 32, 51, 0.12)',
       },
     },
   },
