@@ -10,22 +10,80 @@ create table if not exists public.properties (
   bedrooms integer not null default 1,
   bathrooms integer not null default 1,
   owner_whatsapp text default '43998108328',
+  owner_email text,
   maps_url text,
   theme_color text default '#2563eb',
+  license_key text,
+  license_expires_at date,
+  license_active boolean not null default true,
   amenities text[] not null default '{}',
   rules text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null unique,
+  full_name text,
+  phone text,
+  role text not null default 'client' check (role in ('admin', 'client')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, full_name, phone, role)
+  values (
+    new.id,
+    coalesce(new.email, ''),
+    new.raw_user_meta_data ->> 'full_name',
+    new.raw_user_meta_data ->> 'phone',
+    case
+      when lower(coalesce(new.email, '')) = lower('glawcksilva8@gmail.com') then 'admin'
+      else 'client'
+    end
+  )
+  on conflict (id) do update
+    set email = excluded.email,
+        full_name = coalesce(public.profiles.full_name, excluded.full_name),
+        phone = coalesce(public.profiles.phone, excluded.phone),
+        updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
 alter table public.properties
   add column if not exists owner_whatsapp text;
+
+alter table public.properties
+  add column if not exists owner_email text;
 
 alter table public.properties
   add column if not exists maps_url text;
 
 alter table public.properties
   add column if not exists theme_color text default '#2563eb';
+
+alter table public.properties
+  add column if not exists license_key text;
+
+alter table public.properties
+  add column if not exists license_expires_at date;
+
+alter table public.properties
+  add column if not exists license_active boolean not null default true;
 
 alter table public.properties
   alter column owner_whatsapp set default '43998108328';
@@ -38,7 +96,9 @@ create table if not exists public.property_photos (
   id uuid primary key default gen_random_uuid(),
   property_id uuid not null references public.properties(id) on delete cascade,
   url text not null,
+  storage_path text,
   alt text not null default '',
+  is_primary boolean not null default false,
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
@@ -54,9 +114,14 @@ create table if not exists public.reservations (
   check_in date not null,
   check_out date not null,
   total_amount numeric(10, 2) not null default 0,
-  status text not null default 'pending' check (status in ('pending', 'confirmed', 'cancelled', 'blocked')),
+  status text not null default 'pending' check (status in ('pending', 'confirmed', 'cancelled', 'blocked', 'maintenance')),
   payment_status text not null default 'pending' check (payment_status in ('pending', 'paid', 'failed', 'refunded', 'not_required')),
   payment_method text not null default 'pix' check (payment_method in ('pix', 'card', 'cash', 'check')),
+  installments integer not null default 1,
+  interest_rate numeric(6, 2) not null default 0,
+  interest_amount numeric(10, 2) not null default 0,
+  source text not null default 'site' check (source in ('site', 'manual')),
+  voucher_used boolean not null default false,
   payment_url text,
   notes text,
   created_at timestamptz not null default now()
@@ -64,6 +129,57 @@ create table if not exists public.reservations (
 
 alter table public.reservations
   add column if not exists payment_method text not null default 'pix';
+
+alter table public.reservations
+  add column if not exists installments integer not null default 1;
+
+alter table public.reservations
+  add column if not exists interest_rate numeric(6, 2) not null default 0;
+
+alter table public.reservations
+  add column if not exists interest_amount numeric(10, 2) not null default 0;
+
+alter table public.reservations
+  add column if not exists source text not null default 'site';
+
+alter table public.reservations
+  add column if not exists voucher_used boolean not null default false;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'reservations_status_check'
+      and conrelid = 'public.reservations'::regclass
+  ) then
+    alter table public.reservations drop constraint reservations_status_check;
+  end if;
+  alter table public.reservations
+    add constraint reservations_status_check
+    check (status in ('pending', 'confirmed', 'cancelled', 'blocked', 'maintenance'));
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'reservations_valid_dates_check'
+      and conrelid = 'public.reservations'::regclass
+  ) then
+    alter table public.reservations drop constraint reservations_valid_dates_check;
+  end if;
+  alter table public.reservations
+    add constraint reservations_valid_dates_check
+    check (check_out > check_in);
+end $$;
+
+alter table public.property_photos
+  add column if not exists storage_path text;
+
+alter table public.property_photos
+  add column if not exists is_primary boolean not null default false;
 
 create table if not exists public.cash_movements (
   id uuid primary key default gen_random_uuid(),
@@ -79,14 +195,159 @@ create table if not exists public.cash_movements (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.payments (
+  id uuid primary key default gen_random_uuid(),
+  reservation_id uuid references public.reservations(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null,
+  amount numeric(10, 2) not null default 0,
+  method text not null default 'pix',
+  installments integer not null default 1,
+  interest_rate numeric(6, 2) not null default 0,
+  status text not null default 'pending',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.vouchers (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
+  reservation_id uuid references public.reservations(id) on delete set null,
+  nights_accumulated integer not null default 0,
+  free_nights integer not null default 1,
+  status text not null default 'available' check (status in ('available', 'used', 'expired')),
+  created_at timestamptz not null default now(),
+  used_at timestamptz
+);
+
+create table if not exists public.suggestions (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid references public.properties(id) on delete set null,
+  user_id uuid references auth.users(id) on delete set null,
+  user_email text,
+  message text not null,
+  status text not null default 'new' check (status in ('new', 'read', 'done')),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.admin_logs (
+  id uuid primary key default gen_random_uuid(),
+  actor_email text,
+  action text not null,
+  details jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.interest_settings (
+  id uuid primary key default gen_random_uuid(),
+  installments integer not null unique,
+  rate numeric(6, 2) not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+insert into public.interest_settings (installments, rate)
+values (1, 0), (2, 3), (3, 5), (4, 7)
+on conflict (installments) do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('property-photos', 'property-photos', true)
+on conflict (id) do update set public = true;
+
 alter table public.properties enable row level security;
+alter table public.profiles enable row level security;
 alter table public.property_photos enable row level security;
 alter table public.reservations enable row level security;
 alter table public.cash_movements enable row level security;
+alter table public.payments enable row level security;
+alter table public.vouchers enable row level security;
+alter table public.suggestions enable row level security;
+alter table public.admin_logs enable row level security;
+alter table public.interest_settings enable row level security;
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role = 'admin'
+  );
+$$;
+
+drop policy if exists "Public can read properties" on public.properties;
+drop policy if exists "Users can read own profile" on public.profiles;
+drop policy if exists "Users can insert own profile" on public.profiles;
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Public can read photos" on public.property_photos;
+drop policy if exists "Public can read unavailable reservation dates" on public.reservations;
+drop policy if exists "Guests can create reservation requests" on public.reservations;
+drop policy if exists "Authenticated owners can manage properties" on public.properties;
+drop policy if exists "Authenticated owners can manage photos" on public.property_photos;
+drop policy if exists "Authenticated owners can manage reservations" on public.reservations;
+drop policy if exists "Authenticated owners can manage cash movements" on public.cash_movements;
+drop policy if exists "Admins can manage payments" on public.payments;
+drop policy if exists "Users can read own vouchers" on public.vouchers;
+drop policy if exists "Admins can manage vouchers" on public.vouchers;
+drop policy if exists "Authenticated users can send suggestions" on public.suggestions;
+drop policy if exists "Admins can read suggestions" on public.suggestions;
+drop policy if exists "Admins can manage logs" on public.admin_logs;
+drop policy if exists "Public can read interest settings" on public.interest_settings;
+drop policy if exists "Admins can manage interest settings" on public.interest_settings;
+drop policy if exists "Public can read property photo files" on storage.objects;
+drop policy if exists "Admins can upload property photo files" on storage.objects;
+drop policy if exists "Admins can update property photo files" on storage.objects;
+drop policy if exists "Admins can delete property photo files" on storage.objects;
+
+create policy "Public can read property photo files"
+  on storage.objects for select
+  using (bucket_id = 'property-photos');
+
+create policy "Admins can upload property photo files"
+  on storage.objects for insert
+  with check (bucket_id = 'property-photos' and public.is_admin());
+
+create policy "Admins can update property photo files"
+  on storage.objects for update
+  using (bucket_id = 'property-photos' and public.is_admin())
+  with check (bucket_id = 'property-photos' and public.is_admin());
+
+create policy "Admins can delete property photo files"
+  on storage.objects for delete
+  using (bucket_id = 'property-photos' and public.is_admin());
 
 create policy "Public can read properties"
   on public.properties for select
   using (true);
+
+create policy "Users can read own profile"
+  on public.profiles for select
+  using (id = auth.uid() or public.is_admin());
+
+create policy "Users can insert own profile"
+  on public.profiles for insert
+  with check (
+    id = auth.uid()
+    and (role = 'client' or lower(email) = lower('glawcksilva8@gmail.com'))
+  );
+
+create policy "Users can update own profile"
+  on public.profiles for update
+  using (id = auth.uid() or public.is_admin())
+  with check (
+    public.is_admin()
+    or (
+      id = auth.uid()
+      and role = (
+        select role
+        from public.profiles
+        where profiles.id = auth.uid()
+      )
+    )
+  );
 
 create policy "Public can read photos"
   on public.property_photos for select
@@ -94,7 +355,7 @@ create policy "Public can read photos"
 
 create policy "Public can read unavailable reservation dates"
   on public.reservations for select
-  using (status in ('confirmed', 'blocked'));
+  using (status in ('confirmed', 'blocked', 'maintenance'));
 
 create policy "Guests can create reservation requests"
   on public.reservations for insert
@@ -102,22 +363,58 @@ create policy "Guests can create reservation requests"
 
 create policy "Authenticated owners can manage properties"
   on public.properties for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+  using (public.is_admin())
+  with check (public.is_admin());
 
 create policy "Authenticated owners can manage photos"
   on public.property_photos for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+  using (public.is_admin())
+  with check (public.is_admin());
 
 create policy "Authenticated owners can manage reservations"
   on public.reservations for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+  using (public.is_admin() or guest_email = auth.email())
+  with check (public.is_admin());
 
 create policy "Authenticated owners can manage cash movements"
   on public.cash_movements for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+  using (public.is_admin())
+  with check (public.is_admin());
+
+create policy "Admins can manage payments"
+  on public.payments for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
+create policy "Users can read own vouchers"
+  on public.vouchers for select
+  using (public.is_admin() or user_id = auth.uid());
+
+create policy "Admins can manage vouchers"
+  on public.vouchers for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
+create policy "Authenticated users can send suggestions"
+  on public.suggestions for insert
+  with check (auth.role() = 'authenticated' or user_id is null);
+
+create policy "Admins can read suggestions"
+  on public.suggestions for select
+  using (public.is_admin());
+
+create policy "Admins can manage logs"
+  on public.admin_logs for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
+create policy "Public can read interest settings"
+  on public.interest_settings for select
+  using (true);
+
+create policy "Admins can manage interest settings"
+  on public.interest_settings for all
+  using (public.is_admin())
+  with check (public.is_admin());
 
 -- Do not expose the service_role key in the browser.

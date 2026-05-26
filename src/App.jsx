@@ -1,19 +1,36 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
+  BarChart3,
   BedDouble,
   Banknote,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Check,
+  ClipboardList,
   CreditCard,
   DoorOpen,
+  FileText,
+  Home,
   ImagePlus,
   Lock,
+  LogOut,
+  Mail,
   MapPin,
   Menu,
   MessageCircle,
+  Moon,
   Save,
+  Settings,
   ShieldCheck,
+  Sparkles,
+  Sun,
+  Trash2,
+  User,
+  UserPlus,
   Users,
+  Wallet,
   X,
 } from 'lucide-react';
 import {
@@ -41,13 +58,30 @@ const currency = new Intl.NumberFormat('pt-BR', {
 
 const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'glawcksilva8@gmail.com';
 const localAdminPassword = import.meta.env.VITE_LOCAL_ADMIN_PASSWORD || '';
-const canUseLocalAdmin = import.meta.env.DEV && Boolean(localAdminPassword);
+const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
+const canUsePasswordAdmin = Boolean(adminPassword);
 const fallbackOwnerWhatsapp = import.meta.env.VITE_OWNER_WHATSAPP || '43998108328';
+const fallbackOwnerEmail = import.meta.env.VITE_OWNER_EMAIL || adminEmail;
 const paymentLabels = {
   pix: 'Pix',
   card: 'Cartão',
   cash: 'Dinheiro',
   check: 'Cheque',
+};
+
+const defaultInterestRates = [
+  { installments: 1, rate: 0 },
+  { installments: 2, rate: 3 },
+  { installments: 3, rate: 5 },
+  { installments: 4, rate: 7 },
+];
+
+const reservationStatusLabels = {
+  pending: 'Pendente',
+  confirmed: 'Confirmado',
+  blocked: 'Bloqueado manualmente',
+  cancelled: 'Cancelado',
+  maintenance: 'Manutenção',
 };
 
 const emptyProperty = {
@@ -61,8 +95,12 @@ const emptyProperty = {
   bedrooms: 1,
   bathrooms: 1,
   owner_whatsapp: fallbackOwnerWhatsapp,
+  owner_email: fallbackOwnerEmail,
   maps_url: '',
   theme_color: '#2563eb',
+  license_key: '',
+  license_expires_at: '',
+  license_active: true,
   rules: [],
   amenities: [],
 };
@@ -78,7 +116,7 @@ function dateKey(date) {
 function getBookedDates(reservations) {
   const booked = new Set();
   reservations
-    .filter((reservation) => ['confirmed', 'blocked'].includes(reservation.status))
+    .filter((reservation) => ['confirmed', 'blocked', 'maintenance'].includes(reservation.status))
     .forEach((reservation) => {
       const start = toDate(reservation.check_in);
       const end = addDays(toDate(reservation.check_out), -1);
@@ -95,7 +133,7 @@ function hasConflict(reservations, checkIn, checkOut) {
   if (!selectedStart || !selectedEnd) return false;
 
   return reservations
-    .filter((reservation) => ['confirmed', 'blocked'].includes(reservation.status))
+    .filter((reservation) => ['confirmed', 'blocked', 'maintenance'].includes(reservation.status))
     .some((reservation) => {
       const reservedStart = toDate(reservation.check_in);
       const reservedEnd = addDays(toDate(reservation.check_out), -1);
@@ -129,6 +167,28 @@ function normalizeWhatsAppPhone(phone) {
 
 function normalizeHexColor(color) {
   return /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#2563eb';
+}
+
+function normalizeExternalUrl(url) {
+  const trimmed = String(url || '').trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function readLocalData(key, fallback) {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const stored = window.localStorage.getItem(`casa-do-ype:${key}`);
+    return stored ? JSON.parse(stored) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalData(key, value) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(`casa-do-ype:${key}`, JSON.stringify(value));
 }
 
 function mixHex(color, target, amount) {
@@ -177,6 +237,14 @@ function buildWhatsAppUrl(phone, message) {
   return `https://web.whatsapp.com/send?phone=${digits}&text=${encodeURIComponent(message)}`;
 }
 
+function buildOwnerEmailUrl({ ownerEmail, property, reservation, nights }) {
+  const email = String(ownerEmail || fallbackOwnerEmail || '').trim();
+  if (!email) return '';
+  const subject = `Nova solicitação de reserva - ${property.name}`;
+  const body = buildReservationMessage({ property, reservation, nights });
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 function buildGuestConfirmationMessage(property, reservation) {
   const paymentNotice = ['pix', 'card'].includes(reservation.payment_method)
     ? 'Pix e cartão estão em manutenção no momento. Vamos combinar o pagamento por aqui.'
@@ -194,8 +262,88 @@ function buildGuestConfirmationMessage(property, reservation) {
 }
 
 function buildMapsUrl(property) {
-  if (property.maps_url) return property.maps_url;
+  const mapsUrl = normalizeExternalUrl(property.maps_url);
+  if (mapsUrl) return mapsUrl;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(property.city)}`;
+}
+
+function isLicenseValid(property) {
+  if (property.license_active === false) return false;
+  if (!property.license_expires_at) return true;
+  const expiresAt = toDate(property.license_expires_at);
+  if (!expiresAt) return true;
+  return !isBefore(addDays(expiresAt, 1), new Date());
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function parseAdminList(value) {
+  return String(value || '')
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getAuthRole(profile, email) {
+  if (profile?.role) return profile.role;
+  return isAdminEmail(email) ? 'admin' : 'client';
+}
+
+function calculateCardInstallment(total, installments, interestRates) {
+  const rule = interestRates.find((item) => Number(item.installments) === Number(installments));
+  const rate = Number(rule?.rate || 0);
+  const interest = total * (rate / 100);
+  const finalTotal = total + interest;
+  return {
+    installments: Number(installments),
+    rate,
+    interest,
+    finalTotal,
+    installmentValue: Number(installments) ? finalTotal / Number(installments) : finalTotal,
+  };
+}
+
+function getReservationNights(reservation) {
+  if (!reservation?.check_in || !reservation?.check_out) return 0;
+  return Math.max(0, differenceInCalendarDays(toDate(reservation.check_out), toDate(reservation.check_in)));
+}
+
+function getVoucherSummary(reservations) {
+  const confirmedNights = reservations
+    .filter((reservation) => reservation.status === 'confirmed')
+    .reduce((sum, reservation) => sum + getReservationNights(reservation), 0);
+  const generated = Math.floor(confirmedNights / 10);
+  const used = reservations.filter((reservation) => reservation.voucher_used).length;
+  return {
+    confirmedNights,
+    generated,
+    used,
+    available: Math.max(0, generated - used),
+  };
+}
+
+function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function isAdminEmail(email) {
@@ -261,17 +409,26 @@ function SelectInput({ children, ...props }) {
 }
 
 export default function App() {
-  const [properties, setProperties] = useState(demoProperties);
-  const [selectedPropertyId, setSelectedPropertyId] = useState(demoProperty.id);
-  const [photos, setPhotos] = useState(demoPhotos);
-  const [reservations, setReservations] = useState(demoReservations);
-  const [cashMovements, setCashMovements] = useState([]);
+  const [properties, setProperties] = useState(() => readLocalData('properties', demoProperties));
+  const [selectedPropertyId, setSelectedPropertyId] = useState(() => readLocalData('selectedPropertyId', demoProperty.id));
+  const [photos, setPhotos] = useState(() => readLocalData('photos', demoPhotos));
+  const [reservations, setReservations] = useState(() => readLocalData('reservations', demoReservations));
+  const [cashMovements, setCashMovements] = useState(() => readLocalData('cashMovements', []));
+  const [suggestions, setSuggestions] = useState(() => readLocalData('suggestions', []));
+  const [adminLogs, setAdminLogs] = useState(() => readLocalData('adminLogs', []));
+  const [interestRates, setInterestRates] = useState(() => readLocalData('interestRates', defaultInterestRates));
   const [selectedPhoto, setSelectedPhoto] = useState(0);
+  const [heroPhotoIndex, setHeroPhotoIndex] = useState(0);
   const [month, setMonth] = useState(new Date());
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminSession, setAdminSession] = useState(null);
+  const [authProfile, setAuthProfile] = useState(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [clientPortalOpen, setClientPortalOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState(() => readLocalData('themeMode', 'light'));
   const [message, setMessage] = useState('');
+  const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [propertyTransitionKey, setPropertyTransitionKey] = useState(0);
   const [booking, setBooking] = useState({
@@ -283,6 +440,7 @@ export default function App() {
     guest_phone: '',
     guest_document: '',
     payment_method: 'pix',
+    installments: 1,
     notes: '',
   });
 
@@ -300,6 +458,7 @@ export default function App() {
     [cashMovements, property.id],
   );
   const selectedPhotoData = propertyPhotos[selectedPhoto] || propertyPhotos[0] || demoPhotos[0];
+  const heroPhoto = propertyPhotos[heroPhotoIndex] || selectedPhotoData;
   const bookedDates = useMemo(() => getBookedDates(propertyReservations), [propertyReservations]);
   const nights = useMemo(() => {
     if (!booking.check_in || !booking.check_out) return 0;
@@ -307,7 +466,14 @@ export default function App() {
   }, [booking.check_in, booking.check_out]);
   const subtotal = nights * Number(property.daily_rate || 0);
   const total = subtotal + (nights > 0 ? Number(property.cleaning_fee || 0) : 0);
+  const cardQuote = useMemo(
+    () => calculateCardInstallment(total, booking.installments, interestRates),
+    [total, booking.installments, interestRates],
+  );
+  const finalBookingTotal = booking.payment_method === 'card' ? cardQuote.finalTotal : total;
   const reservationConflict = hasConflict(propertyReservations, booking.check_in, booking.check_out);
+  const licenseValid = isLicenseValid(property);
+  const voucherSummary = useMemo(() => getVoucherSummary(propertyReservations), [propertyReservations]);
   const financialSummary = useMemo(() => {
     const received = propertyCashMovements
       .filter((movement) => movement.type === 'income' && movement.status === 'received')
@@ -328,67 +494,165 @@ export default function App() {
     String(booking.notes).trim() &&
     booking.payment_method &&
     Number(booking.guests) > 0 &&
-    Number(booking.guests) <= property.max_guests;
+    Number(booking.guests) <= property.max_guests &&
+    licenseValid;
   const propertyThemeStyle = useMemo(() => buildThemeStyle(property.theme_color), [property.theme_color]);
 
-  useEffect(() => {
-    async function loadData() {
-      if (!hasSupabaseConfig) {
-        setLoading(false);
-        return;
-      }
-
-      const [{ data: propertyRows }, { data: photoRows }, { data: reservationRows }, { data: movementRows }] =
-        await Promise.all([
-          supabase.from('properties').select('*').order('created_at'),
-          supabase.from('property_photos').select('*').order('sort_order'),
-          supabase.from('reservations').select('*').order('check_in'),
-          supabase.from('cash_movements').select('*').order('due_date', { ascending: false }),
-        ]);
-
-      if (propertyRows?.length) {
-        setProperties(propertyRows);
-        setSelectedPropertyId(propertyRows[0].id);
-      }
-      if (photoRows?.length) setPhotos(photoRows);
-      if (reservationRows?.length) setReservations(reservationRows);
-      if (movementRows?.length) setCashMovements(movementRows);
+  async function loadSupabaseData() {
+    if (!hasSupabaseConfig) {
       setLoading(false);
+      return;
     }
 
-    loadData();
+    const [{ data: propertyRows }, { data: photoRows }, { data: reservationRows }, { data: movementRows }, { data: interestRows }] =
+      await Promise.all([
+        supabase.from('properties').select('*').order('created_at'),
+        supabase.from('property_photos').select('*').order('sort_order'),
+        supabase.from('reservations').select('*').order('check_in'),
+        supabase.from('cash_movements').select('*').order('due_date', { ascending: false }),
+        supabase.from('interest_settings').select('*').eq('active', true).order('installments'),
+      ]);
+
+    if (propertyRows?.length) {
+      setProperties(propertyRows);
+      setSelectedPropertyId(propertyRows[0].id);
+    }
+    if (photoRows?.length) setPhotos(photoRows);
+    if (reservationRows?.length) setReservations(reservationRows);
+    if (movementRows?.length) setCashMovements(movementRows);
+    if (interestRows?.length) {
+      setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
+    }
+    setLoading(false);
+  }
+
+  async function resolveAuthProfile(session) {
+    if (!session?.user) {
+      setAdminSession(null);
+      setAuthProfile(null);
+      setAdminUnlocked(false);
+      return null;
+    }
+
+    let profile = {
+      id: session.user.id,
+      email: session.user.email,
+      full_name: session.user.user_metadata?.full_name || '',
+      phone: session.user.user_metadata?.phone || '',
+      role: getAuthRole(null, session.user.email),
+    };
+
+    if (hasSupabaseConfig) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (data) {
+        profile = { ...profile, ...data, role: getAuthRole(data, session.user.email) };
+      } else {
+        await supabase.from('profiles').upsert({
+          id: session.user.id,
+          email: session.user.email,
+          role: profile.role,
+          full_name: profile.full_name,
+          phone: profile.phone,
+        });
+      }
+    }
+
+    setAdminSession(session);
+    setAuthProfile(profile);
+    setAdminUnlocked(profile.role === 'admin');
+    return profile;
+  }
+
+  useEffect(() => {
+    loadSupabaseData();
   }, []);
 
   useEffect(() => {
     setSelectedPhoto(0);
     setMessage('');
+    setLastWhatsAppUrl('');
     setPropertyTransitionKey((current) => current + 1);
-    setBooking((current) => ({
+      setBooking((current) => ({
       ...current,
       check_in: '',
       check_out: '',
     }));
+    setHeroPhotoIndex(0);
   }, [property.id]);
 
   useEffect(() => {
     if (!hasSupabaseConfig) return undefined;
 
-    supabase.auth.getSession().then(({ data }) => {
-      const session = data.session && isAdminEmail(data.session.user.email) ? data.session : null;
-      setAdminSession(session);
-      setAdminUnlocked(Boolean(session));
-      if (data.session && !session) supabase.auth.signOut();
+    supabase.auth.getSession().then(async ({ data }) => {
+      const profile = await resolveAuthProfile(data.session);
+      if (profile?.role === 'admin') loadSupabaseData();
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      const adminSession = session && isAdminEmail(session.user.email) ? session : null;
-      setAdminSession(adminSession);
-      setAdminUnlocked(Boolean(adminSession));
-      if (session && !adminSession) supabase.auth.signOut();
+    const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const profile = await resolveAuthProfile(session);
+      if (profile?.role === 'admin') loadSupabaseData();
     });
 
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('properties', properties);
+  }, [properties]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('selectedPropertyId', selectedPropertyId);
+  }, [selectedPropertyId]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('photos', photos);
+  }, [photos]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('reservations', reservations);
+  }, [reservations]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('cashMovements', cashMovements);
+  }, [cashMovements]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('suggestions', suggestions);
+  }, [suggestions]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('adminLogs', adminLogs);
+  }, [adminLogs]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('interestRates', interestRates);
+  }, [interestRates]);
+
+  useEffect(() => {
+    writeLocalData('themeMode', themeMode);
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (propertyPhotos.length <= 1) return undefined;
+    const timer = window.setInterval(() => {
+      setHeroPhotoIndex((current) => (current + 1) % propertyPhotos.length);
+    }, 5200);
+    return () => window.clearInterval(timer);
+  }, [propertyPhotos.length, property.id]);
 
   async function createReservation(event) {
     event.preventDefault();
@@ -398,11 +662,16 @@ export default function App() {
       property_id: property.id,
       ...booking,
       guests: Number(booking.guests),
-      total_amount: total,
+      installments: Number(booking.payment_method === 'card' ? booking.installments : 1),
+      interest_rate: booking.payment_method === 'card' ? cardQuote.rate : 0,
+      interest_amount: booking.payment_method === 'card' ? cardQuote.interest : 0,
+      total_amount: finalBookingTotal,
       status: 'pending',
       payment_status: 'pending',
       payment_method: booking.payment_method,
     };
+
+    let createdReservation = reservation;
 
     if (hasSupabaseConfig) {
       const { data, error } = await supabase.from('reservations').insert(reservation).select().single();
@@ -410,13 +679,24 @@ export default function App() {
         setMessage('Não foi possível criar a reserva agora. Confira os dados e tente novamente.');
         return;
       }
+      createdReservation = data;
       setReservations((current) => [...current, data]);
     } else {
       const localReservation = { ...reservation, id: crypto.randomUUID() };
+      createdReservation = localReservation;
       setReservations((current) => [...current, localReservation]);
     }
 
-    setMessage('Solicitação enviada. Aguarde a confirmação do proprietário pelo WhatsApp.');
+    const ownerEmailUrl = buildOwnerEmailUrl({
+      ownerEmail: property.owner_email,
+      property,
+      reservation: createdReservation,
+      nights,
+    });
+    setLastWhatsAppUrl(ownerEmailUrl);
+    if (ownerEmailUrl) window.open(ownerEmailUrl, '_blank', 'noopener,noreferrer');
+
+    setMessage('Solicitação enviada. O e-mail do proprietário foi aberto com os dados da reserva para confirmação.');
     setBooking({
       check_in: '',
       check_out: '',
@@ -426,6 +706,7 @@ export default function App() {
       guest_phone: '',
       guest_document: '',
       payment_method: 'pix',
+      installments: 1,
       notes: '',
     });
   }
@@ -449,9 +730,14 @@ export default function App() {
   }
 
   async function saveProperty(updated) {
-    setProperties((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    const normalized = {
+      ...updated,
+      maps_url: normalizeExternalUrl(updated.maps_url),
+    };
+
+    setProperties((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
     if (hasSupabaseConfig) {
-      await supabase.from('properties').update(updated).eq('id', updated.id);
+      await supabase.from('properties').update(normalized).eq('id', normalized.id);
     }
     setMessage('Informações da casa atualizadas.');
   }
@@ -472,6 +758,11 @@ export default function App() {
       bedrooms: Number(propertyDraft.bedrooms || 1),
       bathrooms: Number(propertyDraft.bathrooms || 1),
       owner_whatsapp: propertyDraft.owner_whatsapp || fallbackOwnerWhatsapp,
+      owner_email: propertyDraft.owner_email || fallbackOwnerEmail,
+      maps_url: normalizeExternalUrl(propertyDraft.maps_url),
+      license_key: propertyDraft.license_key || '',
+      license_expires_at: propertyDraft.license_expires_at || '',
+      license_active: propertyDraft.license_active !== false,
       amenities: Array.isArray(propertyDraft.amenities) ? propertyDraft.amenities : [],
       rules: Array.isArray(propertyDraft.rules) ? propertyDraft.rules : [],
     };
@@ -492,6 +783,24 @@ export default function App() {
     setMessage('Casa cadastrada. Agora adicione fotos e ajuste os dados.');
   }
 
+  async function deleteProperty(propertyId) {
+    if (properties.length <= 1) {
+      setMessage('Mantenha pelo menos uma casa cadastrada.');
+      return;
+    }
+    const nextProperties = properties.filter((item) => item.id !== propertyId);
+    setProperties(nextProperties);
+    setPhotos((current) => current.filter((photo) => photo.property_id !== propertyId));
+    setReservations((current) => current.filter((reservation) => reservation.property_id !== propertyId));
+    setCashMovements((current) => current.filter((movement) => movement.property_id !== propertyId));
+    if (selectedPropertyId === propertyId) setSelectedPropertyId(nextProperties[0]?.id);
+    if (hasSupabaseConfig) {
+      await supabase.from('properties').delete().eq('id', propertyId);
+    }
+    await addAdminLog('property_deleted', { property_id: propertyId });
+    setMessage('Casa excluída.');
+  }
+
   async function addPhoto(photo) {
     const nextPhoto = {
       id: crypto.randomUUID(),
@@ -505,6 +814,75 @@ export default function App() {
       await supabase.from('property_photos').insert(insertable);
     }
     setMessage('Foto adicionada a galeria.');
+  }
+
+  async function deletePhoto(photoId) {
+    const targetPhoto = photos.find((photo) => photo.id === photoId);
+    setPhotos((current) => current.filter((photo) => photo.id !== photoId));
+    if (selectedPhoto > 0) setSelectedPhoto((current) => Math.max(0, current - 1));
+    if (hasSupabaseConfig) {
+      if (targetPhoto?.storage_path) {
+        await supabase.storage.from('property-photos').remove([targetPhoto.storage_path]);
+      }
+      await supabase.from('property_photos').delete().eq('id', photoId);
+    }
+    setMessage('Foto removida da galeria.');
+  }
+
+  async function reorderPhoto(photoId, direction) {
+    const ordered = [...propertyPhotos];
+    const index = ordered.findIndex((photo) => photo.id === photoId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
+    [ordered[index], ordered[nextIndex]] = [ordered[nextIndex], ordered[index]];
+    const updated = ordered.map((photo, itemIndex) => ({ ...photo, sort_order: itemIndex + 1, is_primary: itemIndex === 0 }));
+    setPhotos((current) => current.map((photo) => updated.find((item) => item.id === photo.id) || photo));
+    if (hasSupabaseConfig) {
+      await Promise.all(
+        updated.map((photo) =>
+          supabase
+            .from('property_photos')
+            .update({ sort_order: photo.sort_order, is_primary: photo.is_primary })
+            .eq('id', photo.id),
+        ),
+      );
+    }
+  }
+
+  async function createManualReservation(reservationDraft) {
+    const reservation = {
+      property_id: property.id,
+      guest_name: reservationDraft.guest_name || 'Reserva manual',
+      guest_email: reservationDraft.guest_email || adminEmail,
+      guest_phone: reservationDraft.guest_phone || '',
+      guest_document: reservationDraft.guest_document || '',
+      guests: Number(reservationDraft.guests || 1),
+      check_in: reservationDraft.check_in,
+      check_out: reservationDraft.check_out,
+      total_amount: Number(reservationDraft.total_amount || 0),
+      status: reservationDraft.status,
+      payment_status: reservationDraft.status === 'blocked' || reservationDraft.status === 'maintenance' ? 'not_required' : 'pending',
+      payment_method: reservationDraft.payment_method || 'cash',
+      notes: reservationDraft.notes || '',
+      source: 'manual',
+    };
+    if (hasConflict(propertyReservations, reservation.check_in, reservation.check_out)) {
+      setMessage('Não foi possível criar: as datas conflitam com outra reserva ou bloqueio.');
+      return false;
+    }
+    let created = { ...reservation, id: crypto.randomUUID() };
+    if (hasSupabaseConfig) {
+      const { data, error } = await supabase.from('reservations').insert(reservation).select().single();
+      if (error) {
+        setMessage('Não foi possível criar a reserva manual agora.');
+        return false;
+      }
+      created = data;
+    }
+    setReservations((current) => [...current, created]);
+    await addAdminLog('manual_reservation_created', { reservation_id: created.id, status: created.status });
+    setMessage('Reserva manual criada e calendário atualizado.');
+    return true;
   }
 
   async function updateReservationStatus(id, status) {
@@ -563,9 +941,90 @@ export default function App() {
     }
   }
 
+  async function updateReservationDetails(id, updates) {
+    const normalized = {
+      ...updates,
+      guests: updates.guests !== undefined ? Number(updates.guests || 1) : undefined,
+      total_amount: updates.total_amount !== undefined ? Number(updates.total_amount || 0) : undefined,
+    };
+    Object.keys(normalized).forEach((key) => normalized[key] === undefined && delete normalized[key]);
+    setReservations((current) =>
+      current.map((reservation) => (reservation.id === id ? { ...reservation, ...normalized } : reservation)),
+    );
+    if (hasSupabaseConfig) {
+      await supabase.from('reservations').update(normalized).eq('id', id);
+    }
+    await addAdminLog('reservation_updated', { reservation_id: id, updates: normalized });
+    setMessage('Reserva atualizada.');
+  }
+
+  async function saveInterestRates(nextRates) {
+    const normalizedRates = nextRates.map((item) => ({
+      installments: Number(item.installments),
+      rate: Number(item.rate || 0),
+    }));
+    setInterestRates(normalizedRates);
+    if (hasSupabaseConfig) {
+      await Promise.all(
+        normalizedRates.map((item) =>
+          supabase
+            .from('interest_settings')
+            .upsert({ installments: item.installments, rate: item.rate, active: true }, { onConflict: 'installments' }),
+        ),
+      );
+    }
+    await addAdminLog('interest_settings_updated', { rates: normalizedRates });
+    setMessage('Configuração de juros atualizada.');
+  }
+
+  async function addAdminLog(action, details = {}) {
+    const log = {
+      id: crypto.randomUUID(),
+      action,
+      details,
+      actor_email: authProfile?.email || adminEmail,
+      created_at: new Date().toISOString(),
+    };
+    setAdminLogs((current) => [log, ...current]);
+    if (hasSupabaseConfig) {
+      const { id, ...insertable } = log;
+      await supabase.from('admin_logs').insert(insertable);
+    }
+  }
+
+  async function submitSuggestion(suggestion) {
+    const payload = {
+      ...suggestion,
+      id: crypto.randomUUID(),
+      property_id: property.id,
+      user_id: authProfile?.id || null,
+      user_email: authProfile?.email || suggestion.email || '',
+      status: 'new',
+      created_at: new Date().toISOString(),
+    };
+    setSuggestions((current) => [payload, ...current]);
+    if (hasSupabaseConfig) {
+      const { id, ...insertable } = payload;
+      await supabase.from('suggestions').insert(insertable);
+    }
+    const emailUrl = `mailto:${encodeURIComponent(fallbackOwnerEmail)}?subject=${encodeURIComponent(
+      `Sugestão para ${property.name}`,
+    )}&body=${encodeURIComponent(`${payload.user_email}\n\n${payload.message}`)}`;
+    window.open(emailUrl, '_blank', 'noopener,noreferrer');
+    setMessage('Sugestão enviada. Obrigado por ajudar a melhorar o site.');
+  }
+
+  async function signOut() {
+    if (hasSupabaseConfig) await supabase.auth.signOut();
+    setAdminSession(null);
+    setAuthProfile(null);
+    setAdminUnlocked(false);
+    setClientPortalOpen(false);
+  }
+
   return (
-    <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
-      <header className="sticky top-0 z-30 border-b border-ink/10 bg-[#f4f8ff]/90 backdrop-blur">
+    <div className={`min-h-screen bg-[#f4f8ff] text-ink ${themeMode === 'dark' ? 'dark bg-slate-950 text-white' : ''}`} style={propertyThemeStyle}>
+      <header className="sticky top-0 z-30 border-b border-ink/10 bg-[#f4f8ff]/90 backdrop-blur dark:border-white/10 dark:bg-slate-950/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
           <a href="#inicio" className="flex items-center gap-3 font-bold">
             <span className="grid h-10 w-10 place-items-center rounded-md text-white" style={{ background: 'var(--property-accent)' }}>
@@ -577,21 +1036,48 @@ export default function App() {
             <a href="#fotos">Fotos</a>
             <a href="#calendario">Calendário</a>
             <a href="#reserva">Reservar</a>
+            <a href="#sugestoes">Sugestões</a>
           </nav>
-          <Button variant="outline" onClick={() => setAdminOpen(true)} aria-label="Abrir administracao">
-            <Menu size={18} />
-            Admin
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+              aria-label="Alternar tema"
+              className="px-3"
+            >
+              {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </Button>
+            {authProfile?.role === 'client' ? (
+              <Button variant="outline" onClick={() => setClientPortalOpen(true)}>
+                <User size={18} />
+                Portal
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (authProfile?.role === 'admin' || adminUnlocked) {
+                  setAdminOpen(true);
+                } else {
+                  setAuthOpen(true);
+                }
+              }}
+              aria-label="Abrir administracao"
+            >
+              <Menu size={18} />
+              {authProfile ? 'Admin' : 'Entrar'}
+            </Button>
+          </div>
         </div>
       </header>
 
       <main id="inicio">
         <section className="relative overflow-hidden bg-ink text-white">
           <img
-            key={`hero-${property.id}-${selectedPhotoData?.id || 'photo'}`}
+            key={`hero-${property.id}-${heroPhoto?.id || 'photo'}`}
             className="property-fade absolute inset-0 h-full w-full object-cover opacity-70"
-            src={selectedPhotoData?.url}
-            alt={selectedPhotoData?.alt || 'Foto da casa'}
+            src={heroPhoto?.url}
+            alt={heroPhoto?.alt || 'Foto da casa'}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-ink/90 via-ink/45 to-transparent" />
           <div className="relative mx-auto grid min-h-[620px] max-w-7xl content-end px-4 pb-12 pt-28 sm:px-6 lg:px-8">
@@ -651,6 +1137,37 @@ export default function App() {
                   Mensagem privada
                 </a>
               </div>
+              {propertyPhotos.length > 1 ? (
+                <div className="mt-8 flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/25"
+                    onClick={() => setHeroPhotoIndex((current) => (current - 1 + propertyPhotos.length) % propertyPhotos.length)}
+                    aria-label="Foto anterior"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <div className="flex gap-2">
+                    {propertyPhotos.map((photo, index) => (
+                      <button
+                        key={photo.id}
+                        type="button"
+                        className={`h-2.5 rounded-full transition ${index === heroPhotoIndex ? 'w-8 bg-white' : 'w-2.5 bg-white/45'}`}
+                        onClick={() => setHeroPhotoIndex(index)}
+                        aria-label={`Mostrar foto ${index + 1}`}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/25"
+                    onClick={() => setHeroPhotoIndex((current) => (current + 1) % propertyPhotos.length)}
+                    aria-label="Próxima foto"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -682,13 +1199,30 @@ export default function App() {
               <div>
                 <h2 className="text-xl font-black">Reserva segura</h2>
                 <p className="mt-2 text-sm leading-6 text-ink/70">
-                  Os dados são enviados ao Supabase com políticas de segurança. Pagamentos reais
-                  devem ser conectados por um provedor oficial.
+                  {hasSupabaseConfig
+                    ? 'Os dados são enviados ao Supabase com políticas de segurança. Pagamentos reais devem ser conectados por um provedor oficial.'
+                    : 'A solicitação abre um e-mail para o proprietário com os dados da reserva. Para banco de dados real, conecte o Supabase.'}
                 </p>
               </div>
             </div>
           </aside>
         </section>
+
+        {property.rules?.length ? (
+          <section className="mx-auto max-w-7xl px-4 pb-14 sm:px-6 lg:px-8">
+            <div className="rounded-md bg-white p-5 shadow-sm">
+              <h2 className="text-2xl font-black">Condições da locação</h2>
+              <div className="mt-4 grid gap-3">
+                {property.rules.map((rule) => (
+                  <div key={rule} className="flex items-start gap-3 text-sm leading-6 text-ink/75">
+                    <ShieldCheck className="mt-0.5 shrink-0 text-leaf" size={18} />
+                    <span>{rule}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section id="fotos" className="bg-mist py-14">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -754,6 +1288,7 @@ export default function App() {
                     type="date"
                     value={booking.check_in}
                     onChange={(event) => setBooking({ ...booking, check_in: event.target.value })}
+                    onInput={(event) => setBooking({ ...booking, check_in: event.target.value })}
                     required
                   />
                 </Field>
@@ -762,6 +1297,7 @@ export default function App() {
                     type="date"
                     value={booking.check_out}
                     onChange={(event) => setBooking({ ...booking, check_out: event.target.value })}
+                    onInput={(event) => setBooking({ ...booking, check_out: event.target.value })}
                     required
                   />
                 </Field>
@@ -811,7 +1347,7 @@ export default function App() {
                 <Field label="Forma de pagamento">
                   <SelectInput
                     value={booking.payment_method}
-                    onChange={(event) => setBooking({ ...booking, payment_method: event.target.value })}
+                    onChange={(event) => setBooking({ ...booking, payment_method: event.target.value, installments: 1 })}
                     required
                   >
                     <option value="pix">Pix</option>
@@ -820,7 +1356,40 @@ export default function App() {
                     <option value="check">Cheque</option>
                   </SelectInput>
                 </Field>
+                {booking.payment_method === 'card' ? (
+                  <Field label="Parcelas">
+                    <SelectInput
+                      value={booking.installments}
+                      onChange={(event) => setBooking({ ...booking, installments: Number(event.target.value) })}
+                    >
+                      {interestRates.map((item) => (
+                        <option key={item.installments} value={item.installments}>
+                          {item.installments}x {Number(item.rate) ? `com ${item.rate}% de juros` : 'sem juros'}
+                        </option>
+                      ))}
+                    </SelectInput>
+                  </Field>
+                ) : null}
               </div>
+              {booking.payment_method === 'card' ? (
+                <div className="grid gap-3 rounded-md border border-ink/10 bg-[#f4f8ff] p-4 text-sm shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-ink/65">Valor original</span>
+                    <strong>{currency.format(total)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-ink/65">Juros aplicados ({cardQuote.rate}%)</span>
+                    <strong>{currency.format(cardQuote.interest)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-ink/10 pt-3 text-base">
+                    <span className="font-black">Total no cartão</span>
+                    <strong>{currency.format(cardQuote.finalTotal)}</strong>
+                  </div>
+                  <p className="font-semibold text-ink/65">
+                    {cardQuote.installments}x de {currency.format(cardQuote.installmentValue)}
+                  </p>
+                </div>
+              ) : null}
               <Field label="Observações">
                 <TextArea
                   value={booking.notes}
@@ -834,8 +1403,13 @@ export default function App() {
                   Essas datas conflitam com uma reserva existente.
                 </p>
               ) : null}
+              {!licenseValid ? (
+                <p className="rounded-md bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  As reservas desta casa estão pausadas porque a licença mensal está vencida ou inativa.
+                </p>
+              ) : null}
               <Button className="w-full sm:w-fit" type="submit" disabled={!canBook}>
-                <MessageCircle size={18} />
+                <Mail size={18} />
                 Enviar solicitacao
               </Button>
             </form>
@@ -847,18 +1421,75 @@ export default function App() {
                 <SummaryRow label="Valor por diária" value={currency.format(property.daily_rate)} />
                 <SummaryRow label="Limpeza" value={nights > 0 ? currency.format(property.cleaning_fee) : '-'} />
                 <SummaryRow label="Pagamento" value={paymentLabels[booking.payment_method]} />
+                {booking.payment_method === 'card' ? (
+                  <>
+                    <SummaryRow label="Juros" value={`${cardQuote.rate}%`} />
+                    <SummaryRow label="Parcela" value={`${cardQuote.installments}x de ${currency.format(cardQuote.installmentValue)}`} />
+                  </>
+                ) : null}
                 <div className="mt-3 border-t border-ink/10 pt-4">
-                  <SummaryRow label="Total estimado" value={currency.format(total)} strong />
+                  <SummaryRow label="Total estimado" value={currency.format(finalBookingTotal)} strong />
                 </div>
+              </div>
+              <div className="mt-6 rounded-md bg-white p-4 text-sm leading-6 text-ink/70">
+                Fidelidade: a cada 10 diárias confirmadas, 1 diária grátis é gerada. Esta casa tem {voucherSummary.available}{' '}
+                voucher(s) disponível(is) no histórico atual.
               </div>
               <div className="mt-6 rounded-md bg-white p-4 text-sm leading-6 text-ink/70">
                 Depois do envio, a reserva fica pendente até a confirmação do proprietário.
               </div>
               {message ? <p className="mt-4 rounded-md bg-mist px-4 py-3 text-sm font-semibold">{message}</p> : null}
+              {lastWhatsAppUrl ? (
+                <a
+                  className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition duration-200 ease-out hover:-translate-y-0.5"
+                  href={lastWhatsAppUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ background: 'var(--property-accent)' }}
+                >
+                  <Mail size={18} />
+                  Abrir e-mail
+                </a>
+              ) : null}
             </aside>
           </div>
         </section>
+
+        <section id="sugestoes" className="bg-mist py-14 dark:bg-slate-900">
+          <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[1fr_420px] lg:px-8">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-black text-ink shadow-sm">
+                <Sparkles size={16} />
+                Sugestões
+              </span>
+              <h2 className="mt-4 text-3xl font-black">Ajude a melhorar sua experiência</h2>
+              <p className="mt-3 max-w-2xl text-ink/70">
+                Envie ideias, ajustes ou melhorias. A sugestão fica registrada no sistema e abre um e-mail para o comercial.
+              </p>
+            </div>
+            <SuggestionForm authProfile={authProfile} onSubmit={submitSuggestion} />
+          </div>
+        </section>
       </main>
+
+      <div className="fixed bottom-5 right-5 z-40 grid gap-2">
+        <a
+          className="grid h-12 w-12 place-items-center rounded-full bg-green-600 text-white shadow-soft transition hover:-translate-y-0.5"
+          href={buildWhatsAppUrl(property.owner_whatsapp || fallbackOwnerWhatsapp, `Olá, preciso de suporte sobre ${property.name}.`)}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="WhatsApp"
+        >
+          <MessageCircle size={20} />
+        </a>
+        <a
+          className="grid h-12 w-12 place-items-center rounded-full bg-white text-ink shadow-soft transition hover:-translate-y-0.5"
+          href={`mailto:${fallbackOwnerEmail}?subject=${encodeURIComponent(`Suporte - ${property.name}`)}`}
+          aria-label="Suporte por e-mail"
+        >
+          <Mail size={20} />
+        </a>
+      </div>
 
       <footer className="border-t border-ink/10 bg-ink px-4 py-8 text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -873,17 +1504,58 @@ export default function App() {
           addPhoto={addPhoto}
           adminUnlocked={adminUnlocked}
           adminSession={adminSession}
+          deleteProperty={deleteProperty}
+          deletePhoto={deletePhoto}
           onClose={() => setAdminOpen(false)}
           onUnlock={() => setAdminUnlocked(true)}
           onSelectProperty={selectProperty}
           properties={properties}
           property={property}
+          propertyPhotos={propertyPhotos}
           reservations={propertyReservations}
           cashMovements={propertyCashMovements}
           financialSummary={financialSummary}
+          interestRates={interestRates}
+          setInterestRates={setInterestRates}
+          saveInterestRates={saveInterestRates}
+          suggestions={suggestions}
+          adminLogs={adminLogs}
+          authProfile={authProfile}
+          onSignOut={signOut}
+          addAdminLog={addAdminLog}
+          createManualReservation={createManualReservation}
+          reorderPhoto={reorderPhoto}
           registerPayment={registerPayment}
           saveProperty={saveProperty}
+          updateReservationDetails={updateReservationDetails}
           updateReservationStatus={updateReservationStatus}
+        />
+      ) : null}
+
+      {authOpen ? (
+        <AuthModal
+          onClose={() => setAuthOpen(false)}
+          onAuthenticated={(profile) => {
+            setAuthProfile(profile);
+            setAdminUnlocked(profile.role === 'admin');
+            setAuthOpen(false);
+            if (profile.role === 'admin') setAdminOpen(true);
+            if (profile.role === 'client') setClientPortalOpen(true);
+          }}
+          resolveAuthProfile={resolveAuthProfile}
+        />
+      ) : null}
+
+      {clientPortalOpen ? (
+        <ClientPortal
+          authProfile={authProfile}
+          reservations={reservations}
+          properties={properties}
+          voucherSummary={getVoucherSummary(
+            reservations.filter((reservation) => reservation.guest_email === authProfile?.email),
+          )}
+          onClose={() => setClientPortalOpen(false)}
+          onSignOut={signOut}
         />
       ) : null}
 
@@ -893,6 +1565,363 @@ export default function App() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
+  const [mode, setMode] = useState('login');
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', phone: '' });
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+
+    if (!hasSupabaseConfig) {
+      if (canUsePasswordAdmin && isAdminEmail(form.email.trim()) && form.password === adminPassword) {
+        const profile = { id: 'local-admin', email: form.email.trim(), role: 'admin', full_name: 'Administrador' };
+        onAuthenticated(profile);
+        return;
+      }
+      setError('Configure o Supabase Auth para login real de clientes e administradores.');
+      return;
+    }
+
+    if (mode === 'signup') {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: form.email.trim(),
+        password: form.password,
+        options: {
+          data: { full_name: form.full_name, phone: form.phone },
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      if (signUpError) {
+        setError('Não foi possível criar a conta. Confira os dados.');
+        return;
+      }
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          email: form.email.trim(),
+          full_name: form.full_name,
+          phone: form.phone,
+          role: isAdminEmail(form.email.trim()) ? 'admin' : 'client',
+        });
+      }
+      setNotice('Cadastro criado. Confirme o e-mail se o Supabase solicitar e depois entre normalmente.');
+      setMode('login');
+      return;
+    }
+
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email: form.email.trim(),
+      password: form.password,
+    });
+    if (signInError?.message === 'Email not confirmed') {
+      setError('E-mail ainda não confirmado no Supabase.');
+      setNotice('Verifique a caixa de entrada ou desative a confirmação de e-mail no Supabase Auth durante testes.');
+      return;
+    }
+    if (signInError || !data.session) {
+      setError('Login não autorizado. Confira e-mail e senha.');
+      return;
+    }
+    const profile = await resolveAuthProfile(data.session);
+    onAuthenticated(profile);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/60 p-4 backdrop-blur">
+      <form className="w-full max-w-md rounded-md bg-white p-5 shadow-soft" onSubmit={submit}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black">{mode === 'login' ? 'Entrar' : 'Criar conta'}</h2>
+            <p className="mt-1 text-sm text-ink/65">Admin e cliente usam a mesma tela de acesso.</p>
+          </div>
+          <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar login">
+            <X size={18} />
+          </Button>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-2 rounded-md bg-mist p-1">
+          <button
+            type="button"
+            className={`rounded-md px-3 py-2 text-sm font-black ${mode === 'login' ? 'bg-white shadow-sm' : ''}`}
+            onClick={() => setMode('login')}
+          >
+            Login
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-3 py-2 text-sm font-black ${mode === 'signup' ? 'bg-white shadow-sm' : ''}`}
+            onClick={() => setMode('signup')}
+          >
+            Cadastro
+          </button>
+        </div>
+        <div className="mt-5 grid gap-4">
+          {mode === 'signup' ? (
+            <>
+              <Field label="Nome completo">
+                <TextInput value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} required />
+              </Field>
+              <Field label="Telefone">
+                <TextInput value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+              </Field>
+            </>
+          ) : null}
+          <Field label="E-mail">
+            <TextInput
+              type="email"
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+              required
+              autoComplete="username"
+            />
+          </Field>
+          <Field label="Senha">
+            <TextInput
+              type="password"
+              value={form.password}
+              onChange={(event) => setForm({ ...form, password: event.target.value })}
+              required
+              minLength={6}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            />
+          </Field>
+          <Button type="submit">
+            {mode === 'login' ? <Lock size={18} /> : <UserPlus size={18} />}
+            {mode === 'login' ? 'Entrar' : 'Cadastrar'}
+          </Button>
+          {error ? <p className="text-sm font-semibold text-red-700">{error}</p> : null}
+          {notice ? <p className="text-sm leading-6 text-ink/70">{notice}</p> : null}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ClientPortal({ authProfile, reservations, properties, voucherSummary, onClose, onSignOut }) {
+  const clientReservations = reservations.filter((reservation) => reservation.guest_email === authProfile?.email);
+  const currentReservation = clientReservations.find((reservation) => ['pending', 'confirmed'].includes(reservation.status));
+  const [view, setView] = useState('dashboard');
+  const menu = [
+    ['dashboard', 'Dashboard', BarChart3],
+    ['reservations', 'Reservas', CalendarDays],
+    ['settings', 'Configurações', Settings],
+    ['profile', 'Dados pessoais', User],
+    ['status', 'Status atual', ShieldCheck],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-ink/60 p-3 backdrop-blur">
+      <div className="mx-auto grid h-full max-w-6xl overflow-hidden rounded-md bg-[#f4f8ff] shadow-soft lg:grid-cols-[260px_1fr]">
+        <aside className="border-b border-ink/10 bg-white p-4 lg:border-b-0 lg:border-r">
+          <div className="flex items-center justify-between gap-3 lg:block">
+            <div>
+              <h2 className="text-xl font-black">Portal do cliente</h2>
+              <p className="mt-1 text-xs font-semibold text-ink/55">{authProfile?.email}</p>
+            </div>
+            <Button type="button" variant="outline" onClick={onClose} className="lg:hidden">
+              <X size={18} />
+            </Button>
+          </div>
+          <nav className="mt-5 grid gap-2">
+            {menu.map(([key, label, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                className={`flex items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-black transition ${
+                  view === key ? 'bg-ink text-white' : 'hover:bg-mist'
+                }`}
+                onClick={() => setView(key)}
+              >
+                <Icon size={18} />
+                {label}
+              </button>
+            ))}
+          </nav>
+          <Button type="button" variant="outline" onClick={onSignOut} className="mt-5 w-full">
+            <LogOut size={18} />
+            Sair
+          </Button>
+        </aside>
+        <main className="overflow-auto p-5">
+          <div className="hidden justify-end lg:flex">
+            <Button type="button" variant="outline" onClick={onClose}>
+              <X size={18} />
+              Fechar
+            </Button>
+          </div>
+          {view === 'dashboard' ? (
+            <div className="grid gap-5">
+              <h3 className="text-2xl font-black">Dashboard</h3>
+              <div className="grid gap-4 md:grid-cols-4">
+                <PortalCard label="Reservas" value={clientReservations.length} icon={CalendarDays} />
+                <PortalCard label="Status atual" value={reservationStatusLabels[currentReservation?.status] || 'Sem reserva'} icon={ShieldCheck} />
+                <PortalCard label="Licenças pagas" value={voucherSummary.generated} icon={CreditCard} />
+                <PortalCard label="Licenças pendentes" value={voucherSummary.available} icon={Wallet} />
+              </div>
+            </div>
+          ) : null}
+          {view === 'reservations' ? (
+            <div className="grid gap-4">
+              <h3 className="text-2xl font-black">Histórico de reservas</h3>
+              {clientReservations.length ? (
+                clientReservations.map((reservation) => {
+                  const property = properties.find((item) => item.id === reservation.property_id);
+                  return (
+                    <div key={reservation.id} className="rounded-md bg-white p-4 shadow-sm">
+                      <p className="font-black">{property?.name || 'Casa'}</p>
+                      <p className="mt-1 text-sm text-ink/65">
+                        {reservation.check_in} até {reservation.check_out} - {reservationStatusLabels[reservation.status] || reservation.status}
+                      </p>
+                      <p className="mt-2 font-bold">{currency.format(reservation.total_amount || 0)}</p>
+                    </div>
+                  );
+                })
+              ) : (
+                <EmptyState title="Nenhuma reserva encontrada" text="Suas reservas aparecerão aqui depois da solicitação." />
+              )}
+            </div>
+          ) : null}
+          {view === 'settings' || view === 'profile' ? (
+            <div className="grid gap-4">
+              <h3 className="text-2xl font-black">{view === 'profile' ? 'Dados pessoais' : 'Configurações'}</h3>
+              <div className="rounded-md bg-white p-4 shadow-sm">
+                <p><strong>Nome:</strong> {authProfile?.full_name || '-'}</p>
+                <p className="mt-2"><strong>E-mail:</strong> {authProfile?.email || '-'}</p>
+                <p className="mt-2"><strong>Telefone:</strong> {authProfile?.phone || '-'}</p>
+              </div>
+            </div>
+          ) : null}
+          {view === 'status' ? (
+            <div className="grid gap-4">
+              <h3 className="text-2xl font-black">Status atual</h3>
+              <div className="rounded-md bg-white p-4 shadow-sm">
+                <p className="text-lg font-black">{reservationStatusLabels[currentReservation?.status] || 'Sem reserva ativa'}</p>
+                <p className="mt-2 text-sm text-ink/65">
+                  Diárias acumuladas: {voucherSummary.confirmedNights}. Vouchers disponíveis: {voucherSummary.available}.
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function SuggestionForm({ authProfile, onSubmit }) {
+  const [form, setForm] = useState({ email: authProfile?.email || '', message: '' });
+
+  return (
+    <form
+      className="grid gap-4 rounded-md bg-white p-5 shadow-soft"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!form.message.trim()) return;
+        onSubmit(form);
+        setForm({ email: authProfile?.email || '', message: '' });
+      }}
+    >
+      <Field label="Seu e-mail">
+        <TextInput
+          type="email"
+          value={form.email}
+          onChange={(event) => setForm({ ...form, email: event.target.value })}
+          placeholder="voce@email.com"
+        />
+      </Field>
+      <Field label="Sugestão">
+        <TextArea
+          value={form.message}
+          onChange={(event) => setForm({ ...form, message: event.target.value })}
+          placeholder="Conte o que pode melhorar"
+          required
+        />
+      </Field>
+      <Button type="submit">
+        <Mail size={18} />
+        Enviar sugestão
+      </Button>
+    </form>
+  );
+}
+
+function PortalCard({ icon: Icon, label, value }) {
+  return (
+    <div className="rounded-md bg-white p-4 shadow-sm">
+      <Icon className="text-leaf" size={20} />
+      <p className="mt-3 text-xs font-bold uppercase tracking-wide text-ink/50">{label}</p>
+      <p className="mt-1 text-xl font-black">{value}</p>
+    </div>
+  );
+}
+
+function EmptyState({ title, text }) {
+  return (
+    <div className="rounded-md border border-dashed border-ink/20 bg-white p-6 text-center">
+      <p className="font-black">{title}</p>
+      <p className="mt-2 text-sm text-ink/60">{text}</p>
+    </div>
+  );
+}
+
+function ManualReservationEditor({ reservation, onSave }) {
+  const [draft, setDraft] = useState({
+    check_in: reservation.check_in || '',
+    check_out: reservation.check_out || '',
+    guests: reservation.guests || 1,
+    total_amount: reservation.total_amount || 0,
+    status: reservation.status || 'blocked',
+    notes: reservation.notes || '',
+  });
+
+  return (
+    <form
+      className="mt-3 grid gap-3 rounded-md bg-[#f4f8ff] p-3"
+      onClick={(event) => event.stopPropagation()}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave(reservation.id, draft);
+      }}
+    >
+      <p className="font-black text-ink">Ajustar reserva manual</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Check-in">
+          <TextInput type="date" value={draft.check_in} onChange={(event) => setDraft({ ...draft, check_in: event.target.value })} />
+        </Field>
+        <Field label="Check-out">
+          <TextInput type="date" value={draft.check_out} onChange={(event) => setDraft({ ...draft, check_out: event.target.value })} />
+        </Field>
+        <Field label="Status">
+          <SelectInput value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
+            <option value="pending">Pendente</option>
+            <option value="confirmed">Confirmado</option>
+            <option value="blocked">Bloqueado manualmente</option>
+            <option value="cancelled">Cancelado</option>
+            <option value="maintenance">Manutenção</option>
+          </SelectInput>
+        </Field>
+        <Field label="Valor">
+          <TextInput
+            type="number"
+            value={draft.total_amount}
+            onChange={(event) => setDraft({ ...draft, total_amount: event.target.value })}
+          />
+        </Field>
+      </div>
+      <Field label="Observações internas">
+        <TextArea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
+      </Field>
+      <Button type="submit" variant="secondary">
+        <Save size={18} />
+        Salvar ajuste
+      </Button>
+    </form>
   );
 }
 
@@ -1001,15 +2030,29 @@ function AdminPanel({
   adminUnlocked,
   adminSession,
   cashMovements,
+  deleteProperty,
+  deletePhoto,
   financialSummary,
+  interestRates,
+  setInterestRates,
+  saveInterestRates,
+  suggestions,
+  adminLogs,
+  authProfile,
+  onSignOut,
+  addAdminLog,
+  createManualReservation,
+  reorderPhoto,
   onClose,
   onSelectProperty,
   onUnlock,
   properties,
   property,
+  propertyPhotos,
   registerPayment,
   reservations,
   saveProperty,
+  updateReservationDetails,
   updateReservationStatus,
 }) {
   const [login, setLogin] = useState({ email: adminEmail, password: '' });
@@ -1018,10 +2061,24 @@ function AdminPanel({
   const [expandedReservationId, setExpandedReservationId] = useState('');
   const [showNewProperty, setShowNewProperty] = useState(false);
   const [reportType, setReportType] = useState('summary');
+  const [adminView, setAdminView] = useState('dashboard');
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [manualReservation, setManualReservation] = useState({
+    guest_name: '',
+    guest_email: '',
+    guest_phone: '',
+    guests: 1,
+    check_in: '',
+    check_out: '',
+    total_amount: 0,
+    status: 'blocked',
+    payment_method: 'cash',
+    notes: '',
+  });
   const [draft, setDraft] = useState({
     ...property,
     amenities: property.amenities?.join(', ') || '',
-    rules: property.rules?.join(', ') || '',
+    rules: property.rules?.join('\n') || '',
   });
   const [newProperty, setNewProperty] = useState({
     ...emptyProperty,
@@ -1035,6 +2092,34 @@ function AdminPanel({
   });
   const [photo, setPhoto] = useState({ url: '', alt: '' });
   const visibleReservations = reservations.filter((reservation) => reservation.status !== 'cancelled');
+  const pendingReservations = reservations.filter((reservation) => reservation.status === 'pending');
+  const confirmedReservations = reservations.filter((reservation) => reservation.status === 'confirmed');
+  const monthlyRevenue = useMemo(() => {
+    const grouped = new Map();
+    cashMovements
+      .filter((movement) => movement.status === 'received')
+      .forEach((movement) => {
+        const key = String(movement.paid_at || movement.due_date || '').slice(0, 7) || 'Sem data';
+        grouped.set(key, (grouped.get(key) || 0) + Number(movement.amount || 0));
+      });
+    const rows = Array.from(grouped.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([monthKey, amount]) => ({ monthKey, amount }));
+    const max = Math.max(...rows.map((row) => row.amount), 1);
+    return rows.map((row) => ({ ...row, percentage: Math.max(8, Math.round((row.amount / max) * 100)) }));
+  }, [cashMovements]);
+  const adminMenu = [
+    ['dashboard', 'Dashboard', BarChart3],
+    ['houses', 'Casas', Home],
+    ['reservations', 'Reservas', CalendarDays],
+    ['confirmations', 'Confirmações', ClipboardList],
+    ['cash', 'Caixa', Wallet],
+    ['reports', 'Relatórios', FileText],
+    ['clients', 'Clientes', Users],
+    ['admin', 'Dados do administrador', User],
+    ['settings', 'Configurações', Settings],
+  ];
   const reportLabels = {
     summary: 'Resumo gerencial',
     reservations: 'Reservas',
@@ -1047,7 +2132,7 @@ function AdminPanel({
     setDraft({
       ...property,
       amenities: property.amenities?.join(', ') || '',
-      rules: property.rules?.join(', ') || '',
+      rules: property.rules?.join('\n') || '',
     });
     setPhoto({ url: '', alt: '' });
   }, [property]);
@@ -1061,8 +2146,8 @@ function AdminPanel({
       max_guests: Number(draft.max_guests),
       bedrooms: Number(draft.bedrooms),
       bathrooms: Number(draft.bathrooms),
-      amenities: draft.amenities.split(',').map((item) => item.trim()).filter(Boolean),
-      rules: draft.rules.split(',').map((item) => item.trim()).filter(Boolean),
+      amenities: parseAdminList(draft.amenities),
+      rules: parseAdminList(draft.rules),
     });
   }
 
@@ -1075,8 +2160,8 @@ function AdminPanel({
       max_guests: Number(newProperty.max_guests),
       bedrooms: Number(newProperty.bedrooms),
       bathrooms: Number(newProperty.bathrooms),
-      amenities: String(newProperty.amenities || '').split(',').map((item) => item.trim()).filter(Boolean),
-      rules: String(newProperty.rules || '').split(',').map((item) => item.trim()).filter(Boolean),
+      amenities: parseAdminList(newProperty.amenities),
+      rules: parseAdminList(newProperty.rules),
     });
     setNewProperty({
       ...emptyProperty,
@@ -1100,7 +2185,305 @@ function AdminPanel({
     if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
   }
 
+  async function handlePhotoFiles(event) {
+    const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
+    for (const file of files) {
+      const alt = file.name.replace(/\.[^.]+$/, '');
+      if (hasSupabaseConfig) {
+        const storagePath = `${property.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '-')}`;
+        const { error } = await supabase.storage.from('property-photos').upload(storagePath, file, {
+          cacheControl: '31536000',
+          upsert: false,
+        });
+        if (error) {
+          const url = await fileToDataUrl(file);
+          await addPhoto({ url, alt });
+          continue;
+        }
+        const { data } = supabase.storage.from('property-photos').getPublicUrl(storagePath);
+        await addPhoto({ url: data.publicUrl, alt, storage_path: storagePath });
+      } else {
+        const url = await fileToDataUrl(file);
+        await addPhoto({ url, alt });
+      }
+    }
+    event.target.value = '';
+  }
+
+  async function submitPhoto(event) {
+    event.preventDefault();
+    if (!photo.url.trim()) return;
+    await addPhoto(photo);
+    setPhoto({ url: '', alt: '' });
+  }
+
+  async function submitManualReservation(event) {
+    event.preventDefault();
+    const created = await createManualReservation(manualReservation);
+    if (!created) return;
+    setManualReservation({
+      guest_name: '',
+      guest_email: '',
+      guest_phone: '',
+      guests: 1,
+      check_in: '',
+      check_out: '',
+      total_amount: 0,
+      status: 'blocked',
+      payment_method: 'cash',
+      notes: '',
+    });
+  }
+
+  async function confirmCancellation() {
+    if (!cancelTarget) return;
+    await updateReservationStatus(cancelTarget.id, 'cancelled');
+    await addAdminLog('reservation_cancelled', {
+      reservation_id: cancelTarget.id,
+      guest_name: cancelTarget.guest_name,
+      property_id: cancelTarget.property_id,
+    });
+    setCancelTarget(null);
+  }
+
   function generateReportPdf() {
+    const doc = new jsPDF();
+    const activeReservations = visibleReservations.filter((reservation) => reservation.status !== 'cancelled');
+    const confirmedReservations = activeReservations.filter((reservation) => reservation.status === 'confirmed');
+    const nightsBooked = confirmedReservations.reduce((sum, reservation) => {
+      const nights = Math.max(0, differenceInCalendarDays(toDate(reservation.check_out), toDate(reservation.check_in)));
+      return sum + nights;
+    }, 0);
+    const totalRevenue = activeReservations.reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
+    const received = cashMovements
+      .filter((movement) => movement.status === 'received')
+      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const occupancy = Math.round((nightsBooked / 365) * 100);
+    const adr = nightsBooked ? totalRevenue / nightsBooked : 0;
+    const title = reportLabels[reportType];
+    const reportDate = format(new Date(), 'dd/MM/yyyy HH:mm');
+
+    const sectionsByType = {
+      summary: [
+        {
+          heading: 'Indicadores',
+          rows: [
+            ['Reservas ativas', activeReservations.length],
+            ['Reservas confirmadas', confirmedReservations.length],
+            ['Noites confirmadas', nightsBooked],
+            ['Receita prevista', currency.format(totalRevenue)],
+            ['Recebido', currency.format(received)],
+            ['A receber', currency.format(Math.max(0, totalRevenue - received))],
+            ['Ocupacao estimada no ano', `${occupancy}%`],
+            ['Diaria media estimada', currency.format(adr)],
+          ],
+        },
+      ],
+      reservations: [
+        {
+          heading: 'Reservas',
+          rows: activeReservations.map((reservation) => [
+            reservation.guest_name || '-',
+            `${reservation.check_in} ate ${reservation.check_out}`,
+            reservation.status || '-',
+            paymentLabels[reservation.payment_method] || 'A combinar',
+            currency.format(reservation.total_amount || 0),
+          ]),
+        },
+      ],
+      financial: [
+        {
+          heading: 'Resumo financeiro',
+          rows: [
+            ['Receita prevista', currency.format(totalRevenue)],
+            ['Recebido', currency.format(received)],
+            ['A receber', currency.format(Math.max(0, totalRevenue - received))],
+            ['Previsao geral', currency.format(financialSummary.forecast)],
+          ],
+        },
+        {
+          heading: 'Lancamentos',
+          rows: cashMovements.map((movement) => [
+            movement.due_date || '-',
+            movement.description || 'Lancamento',
+            movement.status || '-',
+            paymentLabels[movement.payment_method] || movement.payment_method || '-',
+            currency.format(movement.amount || 0),
+          ]),
+        },
+      ],
+      occupancy: [
+        {
+          heading: 'Ocupacao e desempenho',
+          rows: [
+            ['Noites confirmadas', nightsBooked],
+            ['Ocupacao estimada no ano', `${occupancy}%`],
+            ['Diaria media estimada', currency.format(adr)],
+            ['Receita por noite disponivel', currency.format(totalRevenue / 365)],
+          ],
+        },
+      ],
+      guests: [
+        {
+          heading: 'Hospedes',
+          rows: activeReservations.map((reservation) => [
+            reservation.guest_name || '-',
+            reservation.guest_phone || '-',
+            reservation.guest_email || '-',
+            reservation.guest_document || '-',
+          ]),
+        },
+      ],
+    };
+
+    function addHeader() {
+      doc.setFillColor(37, 99, 235);
+      doc.rect(0, 0, 210, 30, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text(title, 14, 13);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`${property.name} | Emitido em ${reportDate}`, 14, 22);
+      doc.setTextColor(15, 23, 42);
+    }
+
+    function ensureSpace(currentY, height = 10) {
+      if (currentY + height <= 285) return currentY;
+      doc.addPage();
+      addHeader();
+      return 42;
+    }
+
+    function addKeyValueRows(rows, startY) {
+      let y = startY;
+      rows.forEach(([label, value]) => {
+        y = ensureSpace(y, 8);
+        doc.setFont('helvetica', 'bold');
+        doc.text(String(label), 14, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(String(value), 82, y);
+        y += 8;
+      });
+      return y;
+    }
+
+    function addReportRows(rows, startY) {
+      let y = startY;
+      if (!rows.length) {
+        doc.text('Nenhum dado disponivel para este relatorio.', 14, y);
+        return y + 8;
+      }
+
+      rows.forEach((row) => {
+        const line = Array.isArray(row) ? row.join(' | ') : String(row);
+        const wrapped = doc.splitTextToSize(line, 182);
+        y = ensureSpace(y, wrapped.length * 6 + 4);
+        doc.text(wrapped, 14, y);
+        y += wrapped.length * 6 + 3;
+      });
+      return y;
+    }
+
+    addHeader();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('Dados da casa', 14, 42);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+
+    let y = addKeyValueRows(
+      [
+        ['Casa', property.name],
+        ['Cidade', property.city],
+        ['Diaria', currency.format(property.daily_rate || 0)],
+        ['Taxa de limpeza', currency.format(property.cleaning_fee || 0)],
+        ['Hospedes maximos', property.max_guests || '-'],
+        ['Google Maps', normalizeExternalUrl(property.maps_url) || 'Nao informado'],
+      ],
+      52,
+    );
+
+    sectionsByType[reportType].forEach((section) => {
+      y = ensureSpace(y + 6, 14);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text(section.heading, 14, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      y += 8;
+      const isKeyValue = section.rows.every((row) => Array.isArray(row) && row.length === 2);
+      y = isKeyValue ? addKeyValueRows(section.rows, y) : addReportRows(section.rows, y);
+    });
+
+    doc.save(`${property.name}-${reportType}.pdf`.replace(/\s+/g, '-').toLowerCase());
+  }
+
+  function generateReportCsv() {
+    const activeReservations = visibleReservations.filter((reservation) => reservation.status !== 'cancelled');
+    const rowsByType = {
+      summary: [
+        ['Indicador', 'Valor'],
+        ['Casa', property.name],
+        ['Reservas ativas', activeReservations.length],
+        ['Reservas confirmadas', activeReservations.filter((reservation) => reservation.status === 'confirmed').length],
+        ['Recebido', financialSummary.received],
+        ['A receber', financialSummary.receivable],
+        ['Previsão', financialSummary.forecast],
+      ],
+      reservations: [
+        ['Cliente', 'E-mail', 'Telefone', 'Check-in', 'Check-out', 'Status', 'Pagamento', 'Total'],
+        ...activeReservations.map((reservation) => [
+          reservation.guest_name || '',
+          reservation.guest_email || '',
+          reservation.guest_phone || '',
+          reservation.check_in || '',
+          reservation.check_out || '',
+          reservationStatusLabels[reservation.status] || reservation.status || '',
+          paymentLabels[reservation.payment_method] || reservation.payment_method || '',
+          Number(reservation.total_amount || 0),
+        ]),
+      ],
+      financial: [
+        ['Data', 'Descrição', 'Status', 'Método', 'Valor'],
+        ...cashMovements.map((movement) => [
+          movement.due_date || '',
+          movement.description || '',
+          movement.status || '',
+          paymentLabels[movement.payment_method] || movement.payment_method || '',
+          Number(movement.amount || 0),
+        ]),
+      ],
+      occupancy: [
+        ['Reserva', 'Check-in', 'Check-out', 'Noites', 'Status'],
+        ...activeReservations.map((reservation) => [
+          reservation.guest_name || '',
+          reservation.check_in || '',
+          reservation.check_out || '',
+          getReservationNights(reservation),
+          reservationStatusLabels[reservation.status] || reservation.status || '',
+        ]),
+      ],
+      guests: [
+        ['Nome', 'Telefone', 'E-mail', 'Documento'],
+        ...activeReservations.map((reservation) => [
+          reservation.guest_name || '',
+          reservation.guest_phone || '',
+          reservation.guest_email || '',
+          reservation.guest_document || '',
+        ]),
+      ],
+    };
+    const csv = rowsByType[reportType].map((row) => row.map(csvCell).join(';')).join('\n');
+    downloadTextFile(
+      `${property.name}-${reportType}.csv`.replace(/\s+/g, '-').toLowerCase(),
+      `\ufeff${csv}`,
+      'text/csv;charset=utf-8',
+    );
+  }
+
+  function generateReportPdfLegacy() {
     const doc = new jsPDF();
     const activeReservations = visibleReservations.filter((reservation) => reservation.status !== 'cancelled');
     const confirmedReservations = activeReservations.filter((reservation) => reservation.status === 'confirmed');
@@ -1196,6 +2579,11 @@ function AdminPanel({
               setLoginError('');
               setLoginNotice('');
 
+              if (canUsePasswordAdmin && isAdminEmail(login.email.trim()) && login.password === adminPassword) {
+                onUnlock();
+                return;
+              }
+
               if (hasSupabaseConfig) {
                 const nextLogin = { email: login.email.trim(), password: login.password };
                 const { data, error } = await supabase.auth.signInWithPassword(nextLogin);
@@ -1214,14 +2602,9 @@ function AdminPanel({
                 return;
               }
 
-              if (!canUseLocalAdmin) {
-                setLoginError('Admin indisponivel sem Supabase Auth configurado.');
-                setLoginNotice('Configure o Supabase Auth para proteger o painel quando publicar o site.');
-                return;
-              }
-
-              if (isAdminEmail(login.email.trim()) && login.password === localAdminPassword) {
-                onUnlock();
+              if (!canUsePasswordAdmin) {
+                setLoginError('Admin indisponivel sem senha configurada.');
+                setLoginNotice('Configure VITE_ADMIN_PASSWORD na Vercel ou Supabase Auth para proteger o painel.');
                 return;
               }
 
@@ -1282,20 +2665,56 @@ function AdminPanel({
             <p className="text-sm leading-6 text-ink/65">
               {hasSupabaseConfig
                 ? 'Use o usuário administrador criado no Supabase Auth para administrar o site.'
-                : 'Login local disponível apenas no desenvolvimento. Em produção, configure Supabase Auth.'}
+                : 'Use a senha administrativa configurada na Vercel. Sem Supabase, os dados ficam salvos neste navegador.'}
             </p>
           </form>
         ) : (
-          <div className="grid gap-8 p-5">
+          <div className="grid gap-5 p-5 lg:grid-cols-[240px_1fr]">
+            <aside className="h-fit rounded-md bg-white p-3 shadow-sm">
+              <div className="mb-3 rounded-md bg-[#f4f8ff] p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Painel</p>
+                <p className="mt-1 text-sm font-black">{authProfile?.full_name || adminSession?.user?.email || 'Administrador'}</p>
+              </div>
+              <nav className="grid gap-1">
+                {adminMenu.map(([key, label, Icon]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-black transition ${
+                      adminView === key ? 'bg-ink text-white' : 'hover:bg-mist'
+                    }`}
+                    onClick={() => setAdminView(key)}
+                  >
+                    <Icon size={17} />
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            </aside>
+            <div className="grid gap-8">
             {adminSession ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white p-4 shadow-sm">
                 <p className="text-sm font-semibold">Logado como {adminSession.user.email}</p>
-                <Button variant="outline" onClick={() => supabase.auth.signOut()}>
+                <Button variant="outline" onClick={onSignOut}>
                   Sair
                 </Button>
               </div>
             ) : null}
-            <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+            {adminView === 'dashboard' ? (
+              <section className="grid gap-5 rounded-md bg-white p-4 shadow-sm">
+                <div>
+                  <h3 className="text-xl font-black">Dashboard</h3>
+                  <p className="mt-1 text-sm text-ink/65">Visão geral operacional da casa selecionada.</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <FinanceCard icon={Home} label="Casas" value={properties.length} />
+                  <FinanceCard icon={CalendarDays} label="Reservas ativas" value={visibleReservations.length} />
+                  <FinanceCard icon={ClipboardList} label="Pendentes" value={pendingReservations.length} />
+                  <FinanceCard icon={Wallet} label="Recebido" value={currency.format(financialSummary.received)} />
+                </div>
+              </section>
+            ) : null}
+            <section className={`${adminView === 'houses' ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-xl font-black">Minhas casas</h3>
@@ -1312,23 +2731,34 @@ function AdminPanel({
               </div>
               <div className="grid gap-2">
                 {properties.map((item) => (
-                  <button
+                  <div
                     key={item.id}
-                    className={`rounded-xl border px-3 py-2 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 ${
+                    className={`grid gap-3 rounded-xl border px-3 py-3 shadow-sm transition duration-200 sm:grid-cols-[1fr_auto] sm:items-center ${
                       item.id === property.id
                         ? 'border-blue-300 bg-gradient-to-r from-blue-50 to-sky-100'
                         : 'border-ink/10 bg-white hover:border-blue-200 hover:bg-mist'
                     }`}
-                    onClick={() => onSelectProperty(item.id)}
                   >
-                    <span className="block text-xs font-black">{item.name}</span>
-                    <span className="mt-0.5 block truncate text-[11px] font-semibold text-ink/60">{item.city}</span>
-                  </button>
+                    <button type="button" className="text-left" onClick={() => onSelectProperty(item.id)}>
+                      <span className="block text-xs font-black">{item.name}</span>
+                      <span className="mt-0.5 block truncate text-[11px] font-semibold text-ink/60">{item.city}</span>
+                    </button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="px-3"
+                      onClick={() => deleteProperty(item.id)}
+                      disabled={properties.length <= 1}
+                      aria-label={`Excluir ${item.name}`}
+                    >
+                      <Trash2 size={16} />
+                    </Button>
+                  </div>
                 ))}
               </div>
             </section>
 
-            {showNewProperty ? (
+            {showNewProperty && adminView === 'houses' ? (
               <form className="grid gap-4 rounded-md border border-leaf/20 bg-white p-4 shadow-sm" onSubmit={submitNewProperty}>
                 <h3 className="text-xl font-black">Cadastrar nova casa</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1350,7 +2780,7 @@ function AdminPanel({
                   </Field>
                   <Field label="Link do Google Maps">
                     <TextInput
-                      type="url"
+                      type="text"
                       value={newProperty.maps_url || ''}
                       onChange={(event) => setNewProperty({ ...newProperty, maps_url: event.target.value })}
                       placeholder="https://maps.google.com/..."
@@ -1413,6 +2843,14 @@ function AdminPanel({
                       placeholder={fallbackOwnerWhatsapp}
                     />
                   </Field>
+                  <Field label="E-mail do proprietário">
+                    <TextInput
+                      type="email"
+                      value={newProperty.owner_email || ''}
+                      onChange={(event) => setNewProperty({ ...newProperty, owner_email: event.target.value })}
+                      placeholder={fallbackOwnerEmail}
+                    />
+                  </Field>
                 </div>
                 <Field label="Chamada">
                   <TextInput
@@ -1437,6 +2875,13 @@ function AdminPanel({
                     placeholder="Wi-Fi, Churrasqueira, Piscina"
                   />
                 </Field>
+              <Field label="Condições da locação, uma por linha">
+                  <TextArea
+                    value={newProperty.rules}
+                    onChange={(event) => setNewProperty({ ...newProperty, rules: event.target.value })}
+                    placeholder="Cancelamento com no mínimo 2 meses de antecedência, retenção de 50% em cancelamentos em cima da hora"
+                  />
+                </Field>
                 <Button type="submit" variant="secondary">
                   <DoorOpen size={18} />
                   Cadastrar casa
@@ -1444,7 +2889,7 @@ function AdminPanel({
               </form>
             ) : null}
 
-            <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+            <section className={`${adminView === 'cash' ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}>
               <div>
                 <h3 className="text-xl font-black">Caixa</h3>
                 <p className="mt-1 text-sm text-ink/65">Acompanhe o que entrou e o que ainda tem para receber.</p>
@@ -1453,6 +2898,24 @@ function AdminPanel({
                 <FinanceCard icon={Banknote} label="Recebido" value={currency.format(financialSummary.received)} />
                 <FinanceCard icon={CreditCard} label="A receber" value={currency.format(financialSummary.receivable)} />
                 <FinanceCard icon={CalendarDays} label="Previsão" value={currency.format(financialSummary.forecast)} />
+              </div>
+              <div className="rounded-md bg-white p-4 shadow-sm">
+                <p className="text-sm font-black">Faturamento mensal</p>
+                {monthlyRevenue.length ? (
+                  <div className="mt-4 grid gap-3">
+                    {monthlyRevenue.map((row) => (
+                      <div key={row.monthKey} className="grid gap-2 sm:grid-cols-[80px_1fr_120px] sm:items-center">
+                        <span className="text-xs font-bold text-ink/55">{row.monthKey}</span>
+                        <div className="h-3 overflow-hidden rounded-full bg-mist">
+                          <div className="h-full rounded-full bg-leaf" style={{ width: `${row.percentage}%` }} />
+                        </div>
+                        <span className="text-sm font-black sm:text-right">{currency.format(row.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-ink/60">Sem recebimentos para montar o gráfico.</p>
+                )}
               </div>
               <div className="grid gap-2 rounded-md bg-white p-4 shadow-sm">
                 <p className="text-sm font-black">Últimos lançamentos</p>
@@ -1469,7 +2932,7 @@ function AdminPanel({
               </div>
             </section>
 
-            <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+            <section className={`${adminView === 'reports' ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}>
               <div>
                 <h3 className="text-xl font-black">Relatórios</h3>
                 <p className="mt-1 text-sm text-ink/65">
@@ -1486,16 +2949,20 @@ function AdminPanel({
                     ))}
                   </SelectInput>
                 </Field>
-                <div className="flex items-end">
+                <div className="flex flex-wrap items-end gap-2">
                   <Button type="button" onClick={generateReportPdf}>
                     <Save size={18} />
                     Emitir PDF
+                  </Button>
+                  <Button type="button" variant="outline" onClick={generateReportCsv}>
+                    <FileText size={18} />
+                    Exportar Excel
                   </Button>
                 </div>
               </div>
             </section>
 
-            <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitProperty}>
+            <form className={`${adminView === 'houses' ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`} onSubmit={submitProperty}>
               <h3 className="text-xl font-black">Dados da casa</h3>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Nome">
@@ -1506,7 +2973,7 @@ function AdminPanel({
                 </Field>
                 <Field label="Link do Google Maps">
                   <TextInput
-                    type="url"
+                    type="text"
                     value={draft.maps_url || ''}
                     onChange={(event) => setDraft({ ...draft, maps_url: event.target.value })}
                     placeholder="https://maps.google.com/..."
@@ -1532,6 +2999,14 @@ function AdminPanel({
                     value={draft.owner_whatsapp || ''}
                     onChange={(event) => setDraft({ ...draft, owner_whatsapp: event.target.value })}
                     placeholder={fallbackOwnerWhatsapp}
+                  />
+                </Field>
+                <Field label="E-mail do proprietário">
+                  <TextInput
+                    type="email"
+                    value={draft.owner_email || ''}
+                    onChange={(event) => setDraft({ ...draft, owner_email: event.target.value })}
+                    placeholder={fallbackOwnerEmail}
                   />
                 </Field>
                 <Field label="Diária">
@@ -1588,6 +3063,46 @@ function AdminPanel({
                   onChange={(event) => setDraft({ ...draft, amenities: event.target.value })}
                 />
               </Field>
+                <Field label="Condições da locação, uma por linha">
+                <TextArea
+                  value={draft.rules}
+                  onChange={(event) => setDraft({ ...draft, rules: event.target.value })}
+                  placeholder="Ex: cancelamento com no mínimo 2 meses de antecedência"
+                />
+              </Field>
+              <section className="grid gap-4 rounded-md border border-ink/10 bg-[#f4f8ff] p-4">
+                <div>
+                  <h4 className="font-black">Licença mensal do proprietário</h4>
+                  <p className="mt-1 text-sm text-ink/65">
+                    Controle a chave, vencimento e liberação de reservas desta casa.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Chave de licença">
+                    <TextInput
+                      value={draft.license_key || ''}
+                      onChange={(event) => setDraft({ ...draft, license_key: event.target.value })}
+                      placeholder="CASA-YPE-2026-001"
+                    />
+                  </Field>
+                  <Field label="Vencimento">
+                    <TextInput
+                      type="date"
+                      value={draft.license_expires_at || ''}
+                      onChange={(event) => setDraft({ ...draft, license_expires_at: event.target.value })}
+                    />
+                  </Field>
+                </div>
+                <label className="flex items-center gap-3 text-sm font-bold text-ink">
+                  <input
+                    type="checkbox"
+                    checked={draft.license_active !== false}
+                    onChange={(event) => setDraft({ ...draft, license_active: event.target.checked })}
+                    className="h-5 w-5 rounded border-ink/20"
+                  />
+                  Licença ativa
+                </label>
+              </section>
               <Button type="submit">
                 <Save size={18} />
                 Salvar dados
@@ -1595,14 +3110,19 @@ function AdminPanel({
             </form>
 
             <form
-              className="grid gap-4 rounded-md bg-white p-4 shadow-sm"
-              onSubmit={(event) => {
-                event.preventDefault();
-                addPhoto(photo);
-                setPhoto({ url: '', alt: '' });
-              }}
+              className={`${adminView === 'houses' ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}
+              onSubmit={submitPhoto}
             >
-              <h3 className="text-xl font-black">Adicionar foto</h3>
+              <h3 className="text-xl font-black">Fotos da casa</h3>
+              <Field label="Selecionar imagens do celular ou computador">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handlePhotoFiles}
+                  className="rounded-md border border-ink/15 bg-white px-3 py-3 text-sm text-ink shadow-sm file:mr-4 file:rounded-md file:border-0 file:bg-mist file:px-4 file:py-2 file:font-bold file:text-ink"
+                />
+              </Field>
               <Field label="URL da foto">
                 <TextInput
                   value={photo.url}
@@ -1620,11 +3140,108 @@ function AdminPanel({
               </Field>
               <Button type="submit" variant="secondary">
                 <ImagePlus size={18} />
-                Adicionar foto
+                Adicionar por URL
               </Button>
+              {propertyPhotos.length ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {propertyPhotos.map((item) => (
+                    <div key={item.id} className="grid gap-2 rounded-md border border-ink/10 bg-[#f4f8ff] p-3">
+                      <img className="h-32 w-full rounded-md object-cover" src={item.url} alt={item.alt || 'Foto da casa'} />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="truncate text-sm font-semibold text-ink/70">{item.alt || 'Foto sem descrição'}</span>
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" onClick={() => reorderPhoto(item.id, -1)} aria-label="Mover foto para cima">
+                            <ChevronLeft size={16} />
+                          </Button>
+                          <Button type="button" variant="outline" onClick={() => reorderPhoto(item.id, 1)} aria-label="Mover foto para baixo">
+                            <ChevronRight size={16} />
+                          </Button>
+                          <Button type="button" variant="outline" onClick={() => deletePhoto(item.id)} aria-label="Excluir foto">
+                            <Trash2 size={16} />
+                          </Button>
+                        </div>
+                      </div>
+                      {item.sort_order === 1 ? <span className="text-xs font-black text-leaf">Imagem principal</span> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm font-semibold text-ink/60">Nenhuma foto cadastrada ainda.</p>
+              )}
             </form>
 
-            <section className="rounded-md bg-white p-4 shadow-sm">
+            {adminView === 'reservations' ? (
+              <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitManualReservation}>
+                <div>
+                  <h3 className="text-xl font-black">Reserva manual e bloqueio de datas</h3>
+                  <p className="mt-1 text-sm text-ink/65">Use para reservas fora do site, manutenção ou indisponibilidade.</p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Nome/identificação">
+                    <TextInput
+                      value={manualReservation.guest_name}
+                      onChange={(event) => setManualReservation({ ...manualReservation, guest_name: event.target.value })}
+                      placeholder="Reserva manual"
+                    />
+                  </Field>
+                  <Field label="Status">
+                    <SelectInput
+                      value={manualReservation.status}
+                      onChange={(event) => setManualReservation({ ...manualReservation, status: event.target.value })}
+                    >
+                      <option value="pending">Pendente</option>
+                      <option value="confirmed">Confirmado</option>
+                      <option value="blocked">Bloqueado manualmente</option>
+                      <option value="maintenance">Manutenção</option>
+                    </SelectInput>
+                  </Field>
+                  <Field label="Check-in">
+                    <TextInput
+                      type="date"
+                      value={manualReservation.check_in}
+                      onChange={(event) => setManualReservation({ ...manualReservation, check_in: event.target.value })}
+                      required
+                    />
+                  </Field>
+                  <Field label="Check-out">
+                    <TextInput
+                      type="date"
+                      value={manualReservation.check_out}
+                      onChange={(event) => setManualReservation({ ...manualReservation, check_out: event.target.value })}
+                      required
+                    />
+                  </Field>
+                  <Field label="Hóspedes">
+                    <TextInput
+                      type="number"
+                      min="1"
+                      value={manualReservation.guests}
+                      onChange={(event) => setManualReservation({ ...manualReservation, guests: event.target.value })}
+                    />
+                  </Field>
+                  <Field label="Valor">
+                    <TextInput
+                      type="number"
+                      value={manualReservation.total_amount}
+                      onChange={(event) => setManualReservation({ ...manualReservation, total_amount: event.target.value })}
+                    />
+                  </Field>
+                </div>
+                <Field label="Observações internas">
+                  <TextArea
+                    value={manualReservation.notes}
+                    onChange={(event) => setManualReservation({ ...manualReservation, notes: event.target.value })}
+                    placeholder="Origem da reserva, motivo do bloqueio ou detalhes internos"
+                  />
+                </Field>
+                <Button type="submit" variant="secondary">
+                  <CalendarDays size={18} />
+                  Criar reserva manual
+                </Button>
+              </form>
+            ) : null}
+
+            <section className={`${['reservations', 'confirmations'].includes(adminView) ? 'block' : 'hidden'} rounded-md bg-white p-4 shadow-sm`}>
               <h3 className="text-xl font-black">Reservas</h3>
               <div className="mt-4 grid gap-3">
                 {visibleReservations.length ? (
@@ -1695,7 +3312,7 @@ function AdminPanel({
                           variant="outline"
                           onClick={(event) => {
                             event.stopPropagation();
-                            updateReservationStatus(reservation.id, 'cancelled');
+                            setCancelTarget(reservation);
                           }}
                         >
                           Cancelar
@@ -1711,6 +3328,9 @@ function AdminPanel({
                         <p><strong>Pagamento:</strong> {paymentLabels[reservation.payment_method] || 'A combinar'}</p>
                         <p><strong>Total:</strong> {currency.format(reservation.total_amount || 0)}</p>
                         <p><strong>Observações:</strong> {reservation.notes || '-'}</p>
+                        {reservation.source === 'manual' ? (
+                          <ManualReservationEditor reservation={reservation} onSave={updateReservationDetails} />
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -1723,6 +3343,102 @@ function AdminPanel({
                 )}
               </div>
             </section>
+            {adminView === 'clients' ? (
+              <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+                <h3 className="text-xl font-black">Clientes</h3>
+                <div className="grid gap-3">
+                  {Array.from(new Map(reservations.map((reservation) => [reservation.guest_email, reservation])).values())
+                    .filter((reservation) => reservation.guest_email)
+                    .map((reservation) => (
+                      <div key={reservation.guest_email} className="rounded-md border border-ink/10 p-4">
+                        <p className="font-black">{reservation.guest_name}</p>
+                        <p className="text-sm text-ink/65">{reservation.guest_email}</p>
+                        <p className="mt-1 text-sm text-ink/65">{reservation.guest_phone || '-'}</p>
+                      </div>
+                    ))}
+                </div>
+              </section>
+            ) : null}
+
+            {adminView === 'admin' ? (
+              <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+                <h3 className="text-xl font-black">Dados do administrador</h3>
+                <p className="text-sm text-ink/65">E-mail: {authProfile?.email || adminEmail}</p>
+                <p className="text-sm text-ink/65">Role: {authProfile?.role || 'admin'}</p>
+                <div className="grid gap-2">
+                  <p className="font-black">Logs recentes</p>
+                  {adminLogs.slice(0, 6).map((log) => (
+                    <div key={log.id || log.created_at} className="rounded-md bg-[#f4f8ff] p-3 text-sm">
+                      <strong>{log.action}</strong> - {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm')}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {adminView === 'settings' ? (
+              <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+                <h3 className="text-xl font-black">Configurações</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {interestRates.map((item, index) => (
+                    <Field key={item.installments} label={`${item.installments}x - juros (%)`}>
+                      <TextInput
+                        type="number"
+                        value={item.rate}
+                        onChange={(event) =>
+                          setInterestRates((current) =>
+                            current.map((rate, rateIndex) =>
+                              rateIndex === index ? { ...rate, rate: Number(event.target.value) } : rate,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <Button type="button" onClick={() => saveInterestRates(interestRates)}>
+                    <Save size={18} />
+                    Salvar juros
+                  </Button>
+                </div>
+                <div className="rounded-md bg-[#f4f8ff] p-4">
+                  <p className="font-black">Sugestões recebidas</p>
+                  <div className="mt-3 grid gap-2">
+                    {suggestions.slice(0, 5).map((suggestion) => (
+                      <p key={suggestion.id} className="rounded-md bg-white p-3 text-sm shadow-sm">
+                        {suggestion.message}
+                      </p>
+                    ))}
+                    {!suggestions.length ? <p className="text-sm text-ink/60">Nenhuma sugestão ainda.</p> : null}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+            {cancelTarget ? (
+              <div className="fixed inset-0 z-50 grid place-items-center bg-ink/60 p-4 backdrop-blur">
+                <div className="w-full max-w-md rounded-md bg-white p-5 shadow-soft">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-1 text-red-600" />
+                    <div>
+                      <h3 className="text-xl font-black">Cancelar reserva</h3>
+                      <p className="mt-2 text-sm leading-6 text-ink/70">
+                        Tem certeza que deseja cancelar esta reserva?
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <Button type="button" variant="outline" onClick={() => setCancelTarget(null)}>
+                      Voltar
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={confirmCancellation}>
+                      Confirmar cancelamento
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
           </div>
         )}
       </div>

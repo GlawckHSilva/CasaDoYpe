@@ -14,10 +14,11 @@ npm run dev
 1. Crie um projeto no Supabase.
 2. Rode o SQL em `supabase/schema.sql` no SQL Editor.
 3. Crie pelo menos uma linha na tabela `properties`.
-4. Adicione fotos em `property_photos`, usando URLs públicas ou arquivos do Supabase Storage.
-5. Crie um usuário em Authentication para acessar a administração:
-   - E-mail: `glawcksilva8@gmail.com`
-   - Senha: defina diretamente no Supabase Auth.
+4. Adicione fotos pelo painel Admin. Com Supabase configurado, o upload usa o bucket `property-photos`.
+5. Crie usuários em Authentication. O SQL cria automaticamente a tabela `profiles` e o trigger de perfil:
+   - Cliente: `profiles.role = 'client'`.
+   - Admin: altere o perfil para `profiles.role = 'admin'`.
+   - O e-mail `glawcksilva8@gmail.com` já nasce como admin pelo trigger do schema.
 6. Em Authentication > URL Configuration, configure:
    - Site URL: `http://127.0.0.1:5173` em desenvolvimento, ou a URL publicada do site.
    - Redirect URLs: `http://127.0.0.1:5173/**` e a URL publicada do site com `/**`.
@@ -42,7 +43,7 @@ supabase functions deploy create-payment-preference
 
 ## Fotos
 
-O jeito mais simples e seguro é subir as fotos no Supabase Storage, deixar o bucket público ou gerar URLs públicas, e adicionar essas URLs pelo painel Admin do site.
+O painel Admin envia imagens para o bucket `property-photos` do Supabase Storage quando o Supabase está configurado. O schema cria o bucket público e as policies para admin enviar, reorganizar e excluir imagens.
 
 ## Várias casas
 

@@ -11,9 +11,18 @@ export const demoProperty = {
   bedrooms: 3,
   bathrooms: 2,
   owner_whatsapp: '43998108328',
+  owner_email: 'glawcksilva8@gmail.com',
   maps_url: '',
   theme_color: '#2563eb',
-  rules: ['Check-in a partir das 14h', 'Check-out até 11h', 'Não fumar dentro da casa'],
+  license_key: 'DEMO-CASA-YPE',
+  license_expires_at: '',
+  license_active: true,
+  rules: [
+    'Check-in a partir das 14h',
+    'Check-out até 11h',
+    'Não fumar dentro da casa',
+    'Cancelamentos em cima da hora podem ter retenção de 50%, conforme combinado com o proprietário.',
+  ],
   amenities: ['Wi-Fi', 'Cozinha equipada', 'Churrasqueira', 'Estacionamento', 'Roupas de cama'],
 };
 
