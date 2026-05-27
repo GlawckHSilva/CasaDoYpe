@@ -1,5 +1,6 @@
 create table if not exists public.properties (
   id uuid primary key default gen_random_uuid(),
+  owner_id uuid references auth.users(id) on delete set null,
   name text not null,
   city text not null,
   headline text not null,
@@ -27,7 +28,7 @@ create table if not exists public.profiles (
   email text not null unique,
   full_name text,
   phone text,
-  role text not null default 'client' check (role in ('admin', 'client')),
+  role text not null default 'hospede' check (role in ('super_admin', 'proprietario', 'hospede', 'admin', 'client')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -46,8 +47,9 @@ begin
     new.raw_user_meta_data ->> 'full_name',
     new.raw_user_meta_data ->> 'phone',
     case
-      when lower(coalesce(new.email, '')) = lower('glawcksilva8@gmail.com') then 'admin'
-      else 'client'
+      when lower(coalesce(new.email, '')) = lower('glawcksilva55@gmail.com') then 'super_admin'
+      when lower(coalesce(new.email, '')) = lower('glawcksilva8@gmail.com') then 'proprietario'
+      else 'hospede'
     end
   )
   on conflict (id) do update
@@ -63,6 +65,24 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'profiles_role_check'
+      and conrelid = 'public.profiles'::regclass
+  ) then
+    alter table public.profiles drop constraint profiles_role_check;
+  end if;
+  alter table public.profiles
+    add constraint profiles_role_check
+    check (role in ('super_admin', 'proprietario', 'hospede', 'admin', 'client'));
+end $$;
+
+alter table public.properties
+  add column if not exists owner_id uuid references auth.users(id) on delete set null;
 
 alter table public.properties
   add column if not exists owner_whatsapp text;
@@ -106,6 +126,7 @@ create table if not exists public.property_photos (
 create table if not exists public.reservations (
   id uuid primary key default gen_random_uuid(),
   property_id uuid not null references public.properties(id) on delete cascade,
+  guest_user_id uuid references auth.users(id) on delete set null,
   guest_name text not null,
   guest_email text not null,
   guest_phone text not null,
@@ -116,7 +137,7 @@ create table if not exists public.reservations (
   total_amount numeric(10, 2) not null default 0,
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'cancelled', 'blocked', 'maintenance')),
   payment_status text not null default 'pending' check (payment_status in ('pending', 'paid', 'failed', 'refunded', 'not_required')),
-  payment_method text not null default 'pix' check (payment_method in ('pix', 'card', 'cash', 'check')),
+  payment_method text not null default 'pix' check (payment_method in ('pix', 'card', 'transfer', 'cash', 'check')),
   installments integer not null default 1,
   interest_rate numeric(6, 2) not null default 0,
   interest_amount numeric(10, 2) not null default 0,
@@ -129,6 +150,9 @@ create table if not exists public.reservations (
 
 alter table public.reservations
   add column if not exists payment_method text not null default 'pix';
+
+alter table public.reservations
+  add column if not exists guest_user_id uuid references auth.users(id) on delete set null;
 
 alter table public.reservations
   add column if not exists installments integer not null default 1;
@@ -158,6 +182,21 @@ begin
   alter table public.reservations
     add constraint reservations_status_check
     check (status in ('pending', 'confirmed', 'cancelled', 'blocked', 'maintenance'));
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'reservations_payment_method_check'
+      and conrelid = 'public.reservations'::regclass
+  ) then
+    alter table public.reservations drop constraint reservations_payment_method_check;
+  end if;
+  alter table public.reservations
+    add constraint reservations_payment_method_check
+    check (payment_method in ('pix', 'card', 'transfer', 'cash', 'check'));
 end $$;
 
 do $$
@@ -207,6 +246,66 @@ create table if not exists public.payments (
   created_at timestamptz not null default now()
 );
 
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'cash_movements_payment_method_check'
+      and conrelid = 'public.cash_movements'::regclass
+  ) then
+    alter table public.cash_movements drop constraint cash_movements_payment_method_check;
+  end if;
+  alter table public.cash_movements
+    add constraint cash_movements_payment_method_check
+    check (payment_method in ('pix', 'card', 'transfer', 'cash', 'check'));
+end $$;
+
+create table if not exists public.payment_settings (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references auth.users(id) on delete cascade,
+  property_id uuid unique references public.properties(id) on delete cascade,
+  pix_key text,
+  pix_key_type text,
+  pix_receiver_name text,
+  bank_name text,
+  bank_agency text,
+  bank_account text,
+  bank_account_type text,
+  bank_holder text,
+  bank_document text,
+  card_payment_url text,
+  max_installments integer not null default 1,
+  payment_instructions text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.licenses (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references auth.users(id) on delete cascade,
+  property_id uuid references public.properties(id) on delete set null,
+  license_key text not null unique,
+  status text not null default 'trial' check (status in ('active', 'expired', 'suspended', 'trial')),
+  plan text not null default 'mensal',
+  starts_at date not null default current_date,
+  expires_at date not null default (current_date + interval '30 days'),
+  monthly_value numeric(10, 2) not null default 0,
+  property_limit integer not null default 1,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.license_history (
+  id uuid primary key default gen_random_uuid(),
+  license_id uuid references public.licenses(id) on delete cascade,
+  action text not null,
+  actor_email text,
+  details jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.vouchers (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
@@ -222,11 +321,19 @@ create table if not exists public.suggestions (
   id uuid primary key default gen_random_uuid(),
   property_id uuid references public.properties(id) on delete set null,
   user_id uuid references auth.users(id) on delete set null,
+  name text,
   user_email text,
+  email text,
   message text not null,
   status text not null default 'new' check (status in ('new', 'read', 'done')),
   created_at timestamptz not null default now()
 );
+
+alter table public.suggestions
+  add column if not exists name text;
+
+alter table public.suggestions
+  add column if not exists email text;
 
 create table if not exists public.admin_logs (
   id uuid primary key default gen_random_uuid(),
@@ -262,8 +369,11 @@ alter table public.vouchers enable row level security;
 alter table public.suggestions enable row level security;
 alter table public.admin_logs enable row level security;
 alter table public.interest_settings enable row level security;
+alter table public.payment_settings enable row level security;
+alter table public.licenses enable row level security;
+alter table public.license_history enable row level security;
 
-create or replace function public.is_admin()
+create or replace function public.is_super_admin()
 returns boolean
 language sql
 stable
@@ -274,8 +384,33 @@ as $$
     select 1
     from public.profiles
     where id = auth.uid()
-      and role = 'admin'
+      and role = 'super_admin'
   );
+$$;
+
+create or replace function public.is_owner()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role in ('proprietario', 'admin')
+  );
+$$;
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.is_super_admin() or public.is_owner();
 $$;
 
 drop policy if exists "Public can read properties" on public.properties;
@@ -297,6 +432,12 @@ drop policy if exists "Admins can read suggestions" on public.suggestions;
 drop policy if exists "Admins can manage logs" on public.admin_logs;
 drop policy if exists "Public can read interest settings" on public.interest_settings;
 drop policy if exists "Admins can manage interest settings" on public.interest_settings;
+drop policy if exists "Owners can manage payment settings" on public.payment_settings;
+drop policy if exists "Super admins can manage payment settings" on public.payment_settings;
+drop policy if exists "Owners can read own licenses" on public.licenses;
+drop policy if exists "Super admins can manage licenses" on public.licenses;
+drop policy if exists "Owners can read own license history" on public.license_history;
+drop policy if exists "Super admins can manage license history" on public.license_history;
 drop policy if exists "Public can read property photo files" on storage.objects;
 drop policy if exists "Admins can upload property photo files" on storage.objects;
 drop policy if exists "Admins can update property photo files" on storage.objects;
@@ -325,20 +466,23 @@ create policy "Public can read properties"
 
 create policy "Users can read own profile"
   on public.profiles for select
-  using (id = auth.uid() or public.is_admin());
+  using (id = auth.uid() or public.is_super_admin());
 
 create policy "Users can insert own profile"
   on public.profiles for insert
   with check (
     id = auth.uid()
-    and (role = 'client' or lower(email) = lower('glawcksilva8@gmail.com'))
+    and (
+      role in ('hospede', 'client')
+      or lower(email) in (lower('glawcksilva8@gmail.com'), lower('glawcksilva55@gmail.com'))
+    )
   );
 
 create policy "Users can update own profile"
   on public.profiles for update
   using (id = auth.uid() or public.is_admin())
   with check (
-    public.is_admin()
+    public.is_super_admin()
     or (
       id = auth.uid()
       and role = (
@@ -363,28 +507,72 @@ create policy "Guests can create reservation requests"
 
 create policy "Authenticated owners can manage properties"
   on public.properties for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (public.is_super_admin() or owner_id = auth.uid())
+  with check (public.is_super_admin() or owner_id = auth.uid());
 
 create policy "Authenticated owners can manage photos"
   on public.property_photos for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = property_photos.property_id
+        and properties.owner_id = auth.uid()
+    )
+  )
+  with check (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = property_photos.property_id
+        and properties.owner_id = auth.uid()
+    )
+  );
 
 create policy "Authenticated owners can manage reservations"
   on public.reservations for all
-  using (public.is_admin() or guest_email = auth.email())
-  with check (public.is_admin());
+  using (
+    public.is_super_admin()
+    or guest_user_id = auth.uid()
+    or guest_email = auth.email()
+    or exists (
+      select 1 from public.properties
+      where properties.id = reservations.property_id
+        and properties.owner_id = auth.uid()
+    )
+  )
+  with check (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = reservations.property_id
+        and properties.owner_id = auth.uid()
+    )
+  );
 
 create policy "Authenticated owners can manage cash movements"
   on public.cash_movements for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = cash_movements.property_id
+        and properties.owner_id = auth.uid()
+    )
+  )
+  with check (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = cash_movements.property_id
+        and properties.owner_id = auth.uid()
+    )
+  );
 
 create policy "Admins can manage payments"
   on public.payments for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (public.is_super_admin() or user_id = auth.uid())
+  with check (public.is_super_admin());
 
 create policy "Users can read own vouchers"
   on public.vouchers for select
@@ -392,8 +580,8 @@ create policy "Users can read own vouchers"
 
 create policy "Admins can manage vouchers"
   on public.vouchers for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
 
 create policy "Authenticated users can send suggestions"
   on public.suggestions for insert
@@ -401,12 +589,12 @@ create policy "Authenticated users can send suggestions"
 
 create policy "Admins can read suggestions"
   on public.suggestions for select
-  using (public.is_admin());
+  using (public.is_super_admin() or public.is_owner());
 
 create policy "Admins can manage logs"
   on public.admin_logs for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
 
 create policy "Public can read interest settings"
   on public.interest_settings for select
@@ -414,7 +602,37 @@ create policy "Public can read interest settings"
 
 create policy "Admins can manage interest settings"
   on public.interest_settings for all
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+create policy "Owners can manage payment settings"
+  on public.payment_settings for all
+  using (public.is_super_admin() or owner_id = auth.uid())
+  with check (public.is_super_admin() or owner_id = auth.uid());
+
+create policy "Owners can read own licenses"
+  on public.licenses for select
+  using (public.is_super_admin() or owner_id = auth.uid());
+
+create policy "Super admins can manage licenses"
+  on public.licenses for all
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+create policy "Owners can read own license history"
+  on public.license_history for select
+  using (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.licenses
+      where licenses.id = license_history.license_id
+        and licenses.owner_id = auth.uid()
+    )
+  );
+
+create policy "Super admins can manage license history"
+  on public.license_history for all
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
 
 -- Do not expose the service_role key in the browser.

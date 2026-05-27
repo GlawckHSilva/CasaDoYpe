@@ -57,6 +57,8 @@ const currency = new Intl.NumberFormat('pt-BR', {
 });
 
 const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'glawcksilva8@gmail.com';
+const superAdminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'glawcksilva55@gmail.com';
+const commercialEmail = import.meta.env.VITE_COMMERCIAL_EMAIL || 'hospedex1@gmail.com';
 const localAdminPassword = import.meta.env.VITE_LOCAL_ADMIN_PASSWORD || '';
 const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
 const canUsePasswordAdmin = Boolean(adminPassword);
@@ -65,8 +67,24 @@ const fallbackOwnerEmail = import.meta.env.VITE_OWNER_EMAIL || adminEmail;
 const paymentLabels = {
   pix: 'Pix',
   card: 'Cartão',
+  transfer: 'Transferência',
   cash: 'Dinheiro',
   check: 'Cheque',
+};
+
+const roleLabels = {
+  super_admin: 'Super Admin',
+  proprietario: 'Proprietário',
+  hospede: 'Hóspede',
+  admin: 'Proprietário',
+  client: 'Hóspede',
+};
+
+const licenseStatusLabels = {
+  active: 'Ativa',
+  expired: 'Vencida',
+  suspended: 'Suspensa',
+  trial: 'Teste',
 };
 
 const defaultInterestRates = [
@@ -245,10 +263,41 @@ function buildOwnerEmailUrl({ ownerEmail, property, reservation, nights }) {
   return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function buildGuestConfirmationMessage(property, reservation) {
-  const paymentNotice = ['pix', 'card'].includes(reservation.payment_method)
-    ? 'Pix e cartão estão em manutenção no momento. Vamos combinar o pagamento por aqui.'
-    : `Forma de pagamento combinada: ${paymentLabels[reservation.payment_method] || 'a combinar'}.`;
+function buildGuestConfirmationMessage(property, reservation, paymentSettings) {
+  const paymentNoticeByMethod = {
+    pix: [
+      'Pagamento por Pix:',
+      paymentSettings?.pix_receiver_name ? `Recebedor: ${paymentSettings.pix_receiver_name}` : null,
+      paymentSettings?.pix_key_type ? `Tipo da chave: ${paymentSettings.pix_key_type}` : null,
+      paymentSettings?.pix_key ? `Chave Pix: ${paymentSettings.pix_key}` : null,
+      `Valor: ${currency.format(reservation.total_amount || 0)}`,
+      paymentSettings?.payment_instructions || 'Envie o comprovante após o pagamento.',
+    ],
+    card: [
+      'Pagamento por cartão:',
+      reservation.installments ? `Parcelamento: ${reservation.installments}x` : null,
+      reservation.interest_rate ? `Juros aplicado: ${reservation.interest_rate}%` : null,
+      paymentSettings?.card_payment_url ? `Link de pagamento: ${paymentSettings.card_payment_url}` : null,
+      `Valor total: ${currency.format(reservation.total_amount || 0)}`,
+      paymentSettings?.card_payment_url ? null : 'O proprietário enviará o link de pagamento.',
+    ],
+    transfer: [
+      'Transferência bancária:',
+      paymentSettings?.bank_name ? `Banco: ${paymentSettings.bank_name}` : null,
+      paymentSettings?.bank_agency ? `Agência: ${paymentSettings.bank_agency}` : null,
+      paymentSettings?.bank_account ? `Conta: ${paymentSettings.bank_account}` : null,
+      paymentSettings?.bank_account_type ? `Tipo de conta: ${paymentSettings.bank_account_type}` : null,
+      paymentSettings?.bank_holder ? `Titular: ${paymentSettings.bank_holder}` : null,
+      paymentSettings?.bank_document ? `CPF/CNPJ: ${paymentSettings.bank_document}` : null,
+      `Valor: ${currency.format(reservation.total_amount || 0)}`,
+      paymentSettings?.payment_instructions || 'Envie o comprovante após a transferência.',
+    ],
+  };
+  const paymentNotice = (paymentNoticeByMethod[reservation.payment_method] || [
+    `Forma de pagamento combinada: ${paymentLabels[reservation.payment_method] || 'a combinar'}.`,
+  ])
+    .filter(Boolean)
+    .join('\n');
 
   return [
     `Olá, ${reservation.guest_name}.`,
@@ -292,8 +341,19 @@ function parseAdminList(value) {
 }
 
 function getAuthRole(profile, email) {
+  const normalizedEmail = String(email || '').toLowerCase();
+  if (normalizedEmail === superAdminEmail.toLowerCase()) return 'super_admin';
+  if (profile?.role === 'admin') return 'proprietario';
+  if (profile?.role === 'client') return 'hospede';
   if (profile?.role) return profile.role;
-  return isAdminEmail(email) ? 'admin' : 'client';
+  if (isAdminEmail(email)) return 'proprietario';
+  return 'hospede';
+}
+
+function roleHomePath(role) {
+  if (role === 'super_admin') return '/super-admin';
+  if (role === 'proprietario' || role === 'admin') return '/admin';
+  return '/hospede';
 }
 
 function calculateCardInstallment(total, installments, interestRates) {
@@ -346,8 +406,32 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function generateLicenseKey(prefix = 'HOSPEDEX') {
+  const random = crypto.randomUUID().split('-').slice(0, 3).join('').toUpperCase();
+  return `${prefix}-${format(new Date(), 'yyyyMM')}-${random.slice(0, 12)}`;
+}
+
+function isLicenseExpired(license) {
+  if (!license?.expires_at) return false;
+  return isBefore(addDays(toDate(license.expires_at), 1), new Date());
+}
+
+function normalizeLicenseStatus(license) {
+  if (!license) return 'expired';
+  if (license.status === 'suspended' || license.status === 'trial') return license.status;
+  return isLicenseExpired(license) ? 'expired' : license.status || 'active';
+}
+
 function isAdminEmail(email) {
   return String(email || '').toLowerCase() === adminEmail.toLowerCase();
+}
+
+function MaterialIcon({ name, className = '', size = 20 }) {
+  return (
+    <span className={`material-symbols-rounded leading-none ${className}`} style={{ fontSize: size }} aria-hidden="true">
+      {name}
+    </span>
+  );
 }
 
 function Button({ children, className = '', variant = 'primary', ...props }) {
@@ -417,13 +501,18 @@ export default function App() {
   const [suggestions, setSuggestions] = useState(() => readLocalData('suggestions', []));
   const [adminLogs, setAdminLogs] = useState(() => readLocalData('adminLogs', []));
   const [interestRates, setInterestRates] = useState(() => readLocalData('interestRates', defaultInterestRates));
+  const [profiles, setProfiles] = useState(() => readLocalData('profiles', []));
+  const [licenses, setLicenses] = useState(() => readLocalData('licenses', []));
+  const [paymentSettings, setPaymentSettings] = useState(() => readLocalData('paymentSettings', []));
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [heroPhotoIndex, setHeroPhotoIndex] = useState(0);
+  const [route, setRoute] = useState(() => (typeof window === 'undefined' ? '/' : window.location.pathname || '/'));
   const [month, setMonth] = useState(new Date());
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminSession, setAdminSession] = useState(null);
   const [authProfile, setAuthProfile] = useState(null);
+  const [authChecked, setAuthChecked] = useState(!hasSupabaseConfig);
   const [authOpen, setAuthOpen] = useState(false);
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(() => readLocalData('themeMode', 'light'));
@@ -445,6 +534,20 @@ export default function App() {
   });
 
   const property = properties.find((item) => item.id === selectedPropertyId) || properties[0] || demoProperty;
+  const propertyLicense = useMemo(
+    () =>
+      licenses.find((license) => license.property_id === property.id) ||
+      licenses.find((license) => license.owner_id && license.owner_id === property.owner_id) ||
+      null,
+    [licenses, property.id, property.owner_id],
+  );
+  const propertyPaymentSettings = useMemo(
+    () =>
+      paymentSettings.find((setting) => setting.property_id === property.id) ||
+      paymentSettings.find((setting) => setting.owner_id && setting.owner_id === property.owner_id) ||
+      null,
+    [paymentSettings, property.id, property.owner_id],
+  );
   const propertyPhotos = useMemo(
     () => photos.filter((photo) => photo.property_id === property.id).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
     [photos, property.id],
@@ -472,7 +575,7 @@ export default function App() {
   );
   const finalBookingTotal = booking.payment_method === 'card' ? cardQuote.finalTotal : total;
   const reservationConflict = hasConflict(propertyReservations, booking.check_in, booking.check_out);
-  const licenseValid = isLicenseValid(property);
+  const licenseValid = isLicenseValid(property) && (!propertyLicense || normalizeLicenseStatus(propertyLicense) !== 'expired');
   const voucherSummary = useMemo(() => getVoucherSummary(propertyReservations), [propertyReservations]);
   const financialSummary = useMemo(() => {
     const received = propertyCashMovements
@@ -504,13 +607,25 @@ export default function App() {
       return;
     }
 
-    const [{ data: propertyRows }, { data: photoRows }, { data: reservationRows }, { data: movementRows }, { data: interestRows }] =
+    const [
+      { data: propertyRows },
+      { data: photoRows },
+      { data: reservationRows },
+      { data: movementRows },
+      { data: interestRows },
+      { data: profileRows },
+      { data: licenseRows },
+      { data: paymentSettingRows },
+    ] =
       await Promise.all([
         supabase.from('properties').select('*').order('created_at'),
         supabase.from('property_photos').select('*').order('sort_order'),
         supabase.from('reservations').select('*').order('check_in'),
         supabase.from('cash_movements').select('*').order('due_date', { ascending: false }),
         supabase.from('interest_settings').select('*').eq('active', true).order('installments'),
+        supabase.from('profiles').select('*').order('created_at'),
+        supabase.from('licenses').select('*').order('expires_at', { ascending: true }),
+        supabase.from('payment_settings').select('*').order('created_at'),
       ]);
 
     if (propertyRows?.length) {
@@ -523,6 +638,9 @@ export default function App() {
     if (interestRows?.length) {
       setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
     }
+    if (profileRows?.length) setProfiles(profileRows);
+    if (licenseRows?.length) setLicenses(licenseRows);
+    if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
     setLoading(false);
   }
 
@@ -531,6 +649,7 @@ export default function App() {
       setAdminSession(null);
       setAuthProfile(null);
       setAdminUnlocked(false);
+      setAuthChecked(true);
       return null;
     }
 
@@ -564,13 +683,28 @@ export default function App() {
 
     setAdminSession(session);
     setAuthProfile(profile);
-    setAdminUnlocked(profile.role === 'admin');
+    setAdminUnlocked(['proprietario', 'admin', 'super_admin'].includes(profile.role));
+    setAuthChecked(true);
     return profile;
   }
 
   useEffect(() => {
     loadSupabaseData();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onPopState = () => setRoute(window.location.pathname || '/');
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  function navigateTo(path) {
+    if (typeof window !== 'undefined' && window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setRoute(path);
+  }
 
   useEffect(() => {
     setSelectedPhoto(0);
@@ -642,9 +776,54 @@ export default function App() {
   }, [interestRates]);
 
   useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('profiles', profiles);
+  }, [profiles]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('licenses', licenses);
+  }, [licenses]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('paymentSettings', paymentSettings);
+  }, [paymentSettings]);
+
+  useEffect(() => {
     writeLocalData('themeMode', themeMode);
     document.documentElement.classList.toggle('dark', themeMode === 'dark');
   }, [themeMode]);
+
+  useEffect(() => {
+    if (!authChecked) return;
+    const protectedRoutes = ['/super-admin', '/admin', '/hospede'];
+    if (protectedRoutes.includes(route) && !authProfile) {
+      navigateTo('/login');
+      return;
+    }
+    if (route === '/super-admin' && authProfile?.role !== 'super_admin') {
+      navigateTo(roleHomePath(authProfile?.role));
+      return;
+    }
+    if (route === '/admin' && !['proprietario', 'admin', 'super_admin'].includes(authProfile?.role)) {
+      navigateTo(roleHomePath(authProfile?.role));
+      return;
+    }
+    if (route === '/hospede' && !['hospede', 'client', 'super_admin'].includes(authProfile?.role)) {
+      navigateTo(roleHomePath(authProfile?.role));
+    }
+  }, [route, authProfile, authChecked]);
+
+  useEffect(() => {
+    if (!authProfile) return;
+    if (route === '/admin' && ['proprietario', 'admin', 'super_admin'].includes(authProfile.role)) {
+      setAdminOpen(true);
+    }
+    if (route === '/hospede' && ['hospede', 'client', 'super_admin'].includes(authProfile.role)) {
+      setClientPortalOpen(true);
+    }
+  }, [route, authProfile]);
 
   useEffect(() => {
     if (propertyPhotos.length <= 1) return undefined;
@@ -660,6 +839,7 @@ export default function App() {
 
     const reservation = {
       property_id: property.id,
+      guest_user_id: authProfile?.role === 'hospede' ? authProfile.id : null,
       ...booking,
       guests: Number(booking.guests),
       installments: Number(booking.payment_method === 'card' ? booking.installments : 1),
@@ -752,6 +932,7 @@ export default function App() {
       ...emptyProperty,
       ...propertyDraft,
       id: crypto.randomUUID(),
+      owner_id: propertyDraft.owner_id || (authProfile?.role === 'proprietario' ? authProfile.id : null),
       daily_rate: Number(propertyDraft.daily_rate || 0),
       cleaning_fee: Number(propertyDraft.cleaning_fee || 0),
       max_guests: Number(propertyDraft.max_guests || 1),
@@ -977,6 +1158,34 @@ export default function App() {
     setMessage('Configuração de juros atualizada.');
   }
 
+  async function savePaymentSettings(nextSettings) {
+    const payload = {
+      ...nextSettings,
+      property_id: property.id,
+      owner_id: property.owner_id || (authProfile?.role === 'proprietario' ? authProfile.id : null),
+      max_installments: Number(nextSettings.max_installments || 1),
+    };
+    let saved = { ...payload, id: payload.id || crypto.randomUUID() };
+    if (hasSupabaseConfig) {
+      const { data, error } = await supabase
+        .from('payment_settings')
+        .upsert(payload, { onConflict: 'property_id' })
+        .select()
+        .single();
+      if (error) {
+        setMessage('Não foi possível salvar as configurações financeiras.');
+        return;
+      }
+      saved = data;
+    }
+    setPaymentSettings((current) => {
+      const exists = current.some((item) => item.property_id === property.id);
+      return exists ? current.map((item) => (item.property_id === property.id ? saved : item)) : [...current, saved];
+    });
+    await addAdminLog('payment_settings_updated', { property_id: property.id });
+    setMessage('Configurações financeiras salvas.');
+  }
+
   async function addAdminLog(action, details = {}) {
     const log = {
       id: crypto.randomUUID(),
@@ -1006,11 +1215,20 @@ export default function App() {
     if (hasSupabaseConfig) {
       const { id, ...insertable } = payload;
       await supabase.from('suggestions').insert(insertable);
+      await supabase.functions.invoke('send-suggestion-email', {
+        body: {
+          name: payload.name,
+          email: payload.user_email,
+          message: payload.message,
+          to: commercialEmail,
+          propertyName: property.name,
+        },
+      });
     }
-    const emailUrl = `mailto:${encodeURIComponent(fallbackOwnerEmail)}?subject=${encodeURIComponent(
+    const emailUrl = `mailto:${encodeURIComponent(commercialEmail)}?subject=${encodeURIComponent(
       `Sugestão para ${property.name}`,
-    )}&body=${encodeURIComponent(`${payload.user_email}\n\n${payload.message}`)}`;
-    window.open(emailUrl, '_blank', 'noopener,noreferrer');
+    )}&body=${encodeURIComponent(`${payload.name || ''}\n${payload.user_email}\n\n${payload.message}`)}`;
+    if (!hasSupabaseConfig) window.open(emailUrl, '_blank', 'noopener,noreferrer');
     setMessage('Sugestão enviada. Obrigado por ajudar a melhorar o site.');
   }
 
@@ -1020,6 +1238,53 @@ export default function App() {
     setAuthProfile(null);
     setAdminUnlocked(false);
     setClientPortalOpen(false);
+    navigateTo('/');
+  }
+
+  if (route === '/login') {
+    return (
+      <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
+        <AuthModal
+          onClose={() => navigateTo('/')}
+          onAuthenticated={(profile) => {
+            setAuthProfile(profile);
+            setAdminUnlocked(['proprietario', 'admin', 'super_admin'].includes(profile.role));
+            navigateTo(roleHomePath(profile.role));
+          }}
+          resolveAuthProfile={resolveAuthProfile}
+        />
+      </div>
+    );
+  }
+
+  if (route === '/super-admin') {
+    if (!authChecked) {
+      return <div className="grid min-h-screen place-items-center bg-[#f4f8ff] font-bold text-ink">Validando acesso...</div>;
+    }
+    if (authProfile?.role !== 'super_admin') {
+      return (
+        <AccessDenied
+          title="Acesso restrito"
+          text="A área de Super Admin é privada e exige permissão super_admin."
+          onLogin={() => navigateTo('/login')}
+          onHome={() => navigateTo('/')}
+        />
+      );
+    }
+    return (
+      <SuperAdminDashboard
+        profiles={profiles}
+        properties={properties}
+        reservations={reservations}
+        cashMovements={cashMovements}
+        licenses={licenses}
+        setLicenses={setLicenses}
+        authProfile={authProfile}
+        onSignOut={signOut}
+        onHome={() => navigateTo('/')}
+        addAdminLog={addAdminLog}
+      />
+    );
   }
 
   return (
@@ -1047,8 +1312,8 @@ export default function App() {
             >
               {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </Button>
-            {authProfile?.role === 'client' ? (
-              <Button variant="outline" onClick={() => setClientPortalOpen(true)}>
+            {['hospede', 'client'].includes(authProfile?.role) ? (
+              <Button variant="outline" onClick={() => navigateTo('/hospede')}>
                 <User size={18} />
                 Portal
               </Button>
@@ -1056,10 +1321,12 @@ export default function App() {
             <Button
               variant="outline"
               onClick={() => {
-                if (authProfile?.role === 'admin' || adminUnlocked) {
-                  setAdminOpen(true);
+                if (authProfile?.role === 'super_admin') {
+                  navigateTo('/super-admin');
+                } else if (['proprietario', 'admin'].includes(authProfile?.role) || adminUnlocked) {
+                  navigateTo('/admin');
                 } else {
-                  setAuthOpen(true);
+                  navigateTo('/login');
                 }
               }}
               aria-label="Abrir administracao"
@@ -1352,6 +1619,7 @@ export default function App() {
                   >
                     <option value="pix">Pix</option>
                     <option value="card">Cartão</option>
+                    <option value="transfer">Transferência</option>
                     <option value="cash">Dinheiro</option>
                     <option value="check">Cheque</option>
                   </SelectInput>
@@ -1511,6 +1779,8 @@ export default function App() {
           onSelectProperty={selectProperty}
           properties={properties}
           property={property}
+          propertyLicense={propertyLicense}
+          propertyPaymentSettings={propertyPaymentSettings}
           propertyPhotos={propertyPhotos}
           reservations={propertyReservations}
           cashMovements={propertyCashMovements}
@@ -1527,6 +1797,7 @@ export default function App() {
           reorderPhoto={reorderPhoto}
           registerPayment={registerPayment}
           saveProperty={saveProperty}
+          savePaymentSettings={savePaymentSettings}
           updateReservationDetails={updateReservationDetails}
           updateReservationStatus={updateReservationStatus}
         />
@@ -1537,10 +1808,11 @@ export default function App() {
           onClose={() => setAuthOpen(false)}
           onAuthenticated={(profile) => {
             setAuthProfile(profile);
-            setAdminUnlocked(profile.role === 'admin');
+            setAdminUnlocked(['proprietario', 'admin', 'super_admin'].includes(profile.role));
             setAuthOpen(false);
-            if (profile.role === 'admin') setAdminOpen(true);
-            if (profile.role === 'client') setClientPortalOpen(true);
+            navigateTo(roleHomePath(profile.role));
+            if (profile.role === 'proprietario' || profile.role === 'admin') setAdminOpen(true);
+            if (profile.role === 'hospede' || profile.role === 'client') setClientPortalOpen(true);
           }}
           resolveAuthProfile={resolveAuthProfile}
         />
@@ -1568,6 +1840,430 @@ export default function App() {
   );
 }
 
+function AccessDenied({ title, text, onLogin, onHome }) {
+  return (
+    <div className="grid min-h-screen place-items-center bg-[#f4f8ff] p-4 text-ink">
+      <div className="w-full max-w-md rounded-md bg-white p-6 text-center shadow-soft">
+        <MaterialIcon name="lock" className="text-red-600" size={42} />
+        <h1 className="mt-3 text-2xl font-black">{title}</h1>
+        <p className="mt-2 text-sm leading-6 text-ink/65">{text}</p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Button type="button" onClick={onLogin}>
+            Entrar
+          </Button>
+          <Button type="button" variant="outline" onClick={onHome}>
+            Voltar
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SuperAdminDashboard({
+  profiles,
+  properties,
+  reservations,
+  cashMovements,
+  licenses,
+  setLicenses,
+  authProfile,
+  onSignOut,
+  onHome,
+  addAdminLog,
+}) {
+  const [view, setView] = useState('dashboard');
+  const [query, setQuery] = useState('');
+  const [licenseDraft, setLicenseDraft] = useState({
+    owner_id: '',
+    property_id: '',
+    plan: 'mensal',
+    status: 'trial',
+    starts_at: format(new Date(), 'yyyy-MM-dd'),
+    expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+    monthly_value: 0,
+    property_limit: 1,
+    notes: '',
+  });
+
+  const owners = profiles.filter((profile) => ['proprietario', 'admin'].includes(profile.role));
+  const guests = profiles.filter((profile) => ['hospede', 'client'].includes(profile.role));
+  const visibleLicenses = licenses.filter((license) => {
+    const owner = profiles.find((profile) => profile.id === license.owner_id);
+    const property = properties.find((item) => item.id === license.property_id);
+    const text = `${license.license_key || ''} ${license.plan || ''} ${owner?.email || ''} ${property?.name || ''}`.toLowerCase();
+    return text.includes(query.toLowerCase());
+  });
+  const stats = {
+    owners: owners.length,
+    guests: guests.length,
+    properties: properties.length,
+    reservations: reservations.length,
+    pending: reservations.filter((reservation) => reservation.status === 'pending').length,
+    confirmed: reservations.filter((reservation) => reservation.status === 'confirmed').length,
+    cancelled: reservations.filter((reservation) => reservation.status === 'cancelled').length,
+    activeLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'active').length,
+    expiredLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'expired').length,
+    monthlyRevenue: cashMovements
+      .filter((movement) => String(movement.due_date || '').slice(0, 7) === format(new Date(), 'yyyy-MM'))
+      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0),
+  };
+  const monthlyChart = buildMonthlyRows(cashMovements, reservations);
+  const growthChart = buildGrowthRows(profiles);
+  const menu = [
+    ['dashboard', 'Dashboard', 'dashboard'],
+    ['owners', 'Proprietários', 'manage_accounts'],
+    ['guests', 'Hóspedes', 'group'],
+    ['licenses', 'Licenças', 'vpn_key'],
+    ['reservations', 'Reservas', 'calendar_month'],
+    ['financial', 'Financeiro', 'payments'],
+    ['settings', 'Configurações', 'settings'],
+  ];
+
+  async function upsertLicense(payload) {
+    const normalized = {
+      ...payload,
+      license_key: payload.license_key || generateLicenseKey(),
+      owner_id: payload.owner_id || null,
+      property_id: payload.property_id || null,
+      monthly_value: Number(payload.monthly_value || 0),
+      property_limit: Number(payload.property_limit || 1),
+    };
+    let saved = { ...normalized, id: normalized.id || crypto.randomUUID(), created_at: normalized.created_at || new Date().toISOString() };
+    if (hasSupabaseConfig) {
+      const { data, error } = await supabase.from('licenses').upsert(normalized).select().single();
+      if (error) return;
+      saved = data;
+    }
+    setLicenses((current) => {
+      const exists = current.some((item) => item.id === saved.id);
+      return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current];
+    });
+    if (hasSupabaseConfig) {
+      await supabase.from('license_history').insert({
+        license_id: saved.id,
+        action: payload.id ? 'updated' : 'created',
+        actor_email: authProfile?.email,
+        details: { status: saved.status, plan: saved.plan, expires_at: saved.expires_at },
+      });
+    }
+    await addAdminLog('super_admin_license_saved', { license_id: saved.id, status: saved.status });
+  }
+
+  async function updateLicense(license, updates) {
+    await upsertLicense({ ...license, ...updates });
+  }
+
+  async function deleteLicense(licenseId) {
+    setLicenses((current) => current.filter((license) => license.id !== licenseId));
+    if (hasSupabaseConfig) await supabase.from('licenses').delete().eq('id', licenseId);
+    await addAdminLog('super_admin_license_deleted', { license_id: licenseId });
+  }
+
+  return (
+    <div className="min-h-screen bg-[#eef4ff] text-ink">
+      <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
+        <aside className="border-r border-ink/10 bg-white p-4">
+          <div className="flex items-center gap-3 rounded-md bg-ink p-4 text-white">
+            <MaterialIcon name="admin_panel_settings" size={28} />
+            <div>
+              <p className="font-black">Super Admin</p>
+              <p className="text-xs text-white/65">{authProfile?.email}</p>
+            </div>
+          </div>
+          <nav className="mt-5 grid gap-1">
+            {menu.map(([key, label, icon]) => (
+              <button
+                key={key}
+                type="button"
+                className={`flex items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-black transition ${
+                  view === key ? 'bg-leaf text-white' : 'hover:bg-mist'
+                }`}
+                onClick={() => setView(key)}
+              >
+                <MaterialIcon name={icon} size={20} />
+                {label}
+              </button>
+            ))}
+          </nav>
+          <div className="mt-5 grid gap-2">
+            <Button type="button" variant="outline" onClick={onHome}>
+              Site
+            </Button>
+            <Button type="button" variant="secondary" onClick={onSignOut}>
+              Sair
+            </Button>
+          </div>
+        </aside>
+        <main className="overflow-auto p-4 sm:p-6">
+          <header className="mb-6 flex flex-col gap-3 rounded-md bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-ink/50">HospedeX</p>
+              <h1 className="text-2xl font-black">Gestão total do sistema</h1>
+            </div>
+            <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar licenças, proprietários..." />
+          </header>
+
+          {view === 'dashboard' ? (
+            <div className="grid gap-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <SuperStat icon="manage_accounts" label="Proprietários" value={stats.owners} />
+                <SuperStat icon="group" label="Hóspedes" value={stats.guests} />
+                <SuperStat icon="home_work" label="Imóveis" value={stats.properties} />
+                <SuperStat icon="event_available" label="Reservas" value={stats.reservations} />
+                <SuperStat icon="payments" label="Receita mensal" value={currency.format(stats.monthlyRevenue)} />
+                <SuperStat icon="pending_actions" label="Pendentes" value={stats.pending} />
+                <SuperStat icon="task_alt" label="Confirmadas" value={stats.confirmed} />
+                <SuperStat icon="cancel" label="Canceladas" value={stats.cancelled} />
+                <SuperStat icon="vpn_key" label="Licenças ativas" value={stats.activeLicenses} />
+                <SuperStat icon="warning" label="Licenças vencidas" value={stats.expiredLicenses} />
+              </div>
+              <div className="grid gap-5 xl:grid-cols-2">
+                <SuperChart title="Receita e reservas mensais" rows={monthlyChart} valueKey="revenue" labelKey="monthKey" />
+                <SuperChart title="Crescimento de usuários" rows={growthChart} valueKey="count" labelKey="monthKey" />
+              </div>
+            </div>
+          ) : null}
+
+          {view === 'owners' ? <SuperTable title="Proprietários" rows={owners} columns={['full_name', 'email', 'phone', 'role']} /> : null}
+          {view === 'guests' ? <SuperTable title="Hóspedes" rows={guests} columns={['full_name', 'email', 'phone', 'role']} /> : null}
+          {view === 'reservations' ? (
+            <SuperTable title="Reservas" rows={reservations} columns={['guest_name', 'guest_email', 'check_in', 'check_out', 'status']} />
+          ) : null}
+          {view === 'financial' ? (
+            <SuperTable title="Financeiro" rows={cashMovements} columns={['due_date', 'description', 'status', 'payment_method', 'amount']} />
+          ) : null}
+          {view === 'licenses' ? (
+            <div className="grid gap-5">
+              <form
+                className="grid gap-4 rounded-md bg-white p-4 shadow-sm"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  upsertLicense(licenseDraft);
+                  setLicenseDraft({
+                    owner_id: '',
+                    property_id: '',
+                    plan: 'mensal',
+                    status: 'trial',
+                    starts_at: format(new Date(), 'yyyy-MM-dd'),
+                    expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+                    monthly_value: 0,
+                    property_limit: 1,
+                    notes: '',
+                  });
+                }}
+              >
+                <h2 className="text-xl font-black">Gerar licença</h2>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field label="Proprietário">
+                    <SelectInput value={licenseDraft.owner_id} onChange={(event) => setLicenseDraft({ ...licenseDraft, owner_id: event.target.value })}>
+                      <option value="">Selecione</option>
+                      {owners.map((owner) => (
+                        <option key={owner.id} value={owner.id}>
+                          {owner.email}
+                        </option>
+                      ))}
+                    </SelectInput>
+                  </Field>
+                  <Field label="Imóvel">
+                    <SelectInput value={licenseDraft.property_id} onChange={(event) => setLicenseDraft({ ...licenseDraft, property_id: event.target.value })}>
+                      <option value="">Opcional</option>
+                      {properties.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </SelectInput>
+                  </Field>
+                  <Field label="Plano">
+                    <TextInput value={licenseDraft.plan} onChange={(event) => setLicenseDraft({ ...licenseDraft, plan: event.target.value })} />
+                  </Field>
+                  <Field label="Status">
+                    <SelectInput value={licenseDraft.status} onChange={(event) => setLicenseDraft({ ...licenseDraft, status: event.target.value })}>
+                      <option value="active">Ativa</option>
+                      <option value="expired">Vencida</option>
+                      <option value="suspended">Suspensa</option>
+                      <option value="trial">Teste</option>
+                    </SelectInput>
+                  </Field>
+                  <Field label="Início">
+                    <TextInput type="date" value={licenseDraft.starts_at} onChange={(event) => setLicenseDraft({ ...licenseDraft, starts_at: event.target.value })} />
+                  </Field>
+                  <Field label="Vencimento">
+                    <TextInput type="date" value={licenseDraft.expires_at} onChange={(event) => setLicenseDraft({ ...licenseDraft, expires_at: event.target.value })} />
+                  </Field>
+                  <Field label="Valor mensal">
+                    <TextInput type="number" value={licenseDraft.monthly_value} onChange={(event) => setLicenseDraft({ ...licenseDraft, monthly_value: event.target.value })} />
+                  </Field>
+                  <Field label="Limite de imóveis">
+                    <TextInput type="number" value={licenseDraft.property_limit} onChange={(event) => setLicenseDraft({ ...licenseDraft, property_limit: event.target.value })} />
+                  </Field>
+                </div>
+                <Field label="Observações">
+                  <TextArea value={licenseDraft.notes} onChange={(event) => setLicenseDraft({ ...licenseDraft, notes: event.target.value })} />
+                </Field>
+                <Button type="submit">
+                  <MaterialIcon name="vpn_key" />
+                  Gerar chave
+                </Button>
+              </form>
+              <div className="grid gap-3">
+                {visibleLicenses.map((license) => {
+                  const status = normalizeLicenseStatus(license);
+                  const owner = profiles.find((profile) => profile.id === license.owner_id);
+                  return (
+                    <div key={license.id} className="grid gap-3 rounded-md bg-white p-4 shadow-sm xl:grid-cols-[1fr_auto] xl:items-center">
+                      <div>
+                        <p className="font-black">{license.license_key}</p>
+                        <p className="text-sm text-ink/65">
+                          {owner?.email || 'Sem proprietário'} - {license.plan || 'Plano'} - {licenseStatusLabels[status] || status}
+                        </p>
+                        <p className="mt-1 text-sm text-ink/65">
+                          Vence em {license.expires_at || '-'} - {currency.format(license.monthly_value || 0)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" onClick={() => updateLicense(license, { status: 'active', expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd') })}>
+                          Renovar
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => updateLicense(license, { status: 'suspended' })}>
+                          Suspender
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => updateLicense(license, { status: 'active' })}>
+                          Liberar
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => deleteLicense(license.id)}>
+                          Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {view === 'settings' ? (
+            <div className="rounded-md bg-white p-4 shadow-sm">
+              <h2 className="text-xl font-black">Configurações de segurança</h2>
+              <p className="mt-2 text-sm leading-6 text-ink/65">
+                A rota `/super-admin` não aparece em menus públicos. O acesso é validado pelo role `super_admin` no frontend e pelas
+                policies/funções do Supabase.
+              </p>
+            </div>
+          ) : null}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function buildMonthlyRows(cashMovements, reservations) {
+  const grouped = new Map();
+  cashMovements.forEach((movement) => {
+    const key = String(movement.paid_at || movement.due_date || '').slice(0, 7) || 'Sem data';
+    const current = grouped.get(key) || { monthKey: key, revenue: 0, reservations: 0 };
+    current.revenue += Number(movement.amount || 0);
+    grouped.set(key, current);
+  });
+  reservations.forEach((reservation) => {
+    const key = String(reservation.check_in || '').slice(0, 7) || 'Sem data';
+    const current = grouped.get(key) || { monthKey: key, revenue: 0, reservations: 0 };
+    current.reservations += 1;
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey)).slice(-6);
+}
+
+function buildGrowthRows(profiles) {
+  const grouped = new Map();
+  profiles.forEach((profile) => {
+    const key = String(profile.created_at || '').slice(0, 7) || 'Sem data';
+    grouped.set(key, (grouped.get(key) || 0) + 1);
+  });
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-6)
+    .map(([monthKey, count]) => ({ monthKey, count }));
+}
+
+function SuperStat({ icon, label, value }) {
+  return (
+    <div className="rounded-md bg-white p-4 shadow-sm">
+      <MaterialIcon name={icon} className="text-leaf" size={24} />
+      <p className="mt-3 text-xs font-bold uppercase tracking-wide text-ink/50">{label}</p>
+      <p className="mt-1 text-xl font-black">{value}</p>
+    </div>
+  );
+}
+
+function SuperChart({ title, rows, valueKey, labelKey }) {
+  const max = Math.max(...rows.map((row) => Number(row[valueKey] || 0)), 1);
+  return (
+    <div className="rounded-md bg-white p-4 shadow-sm">
+      <h2 className="font-black">{title}</h2>
+      <div className="mt-4 grid gap-3">
+        {rows.length ? (
+          rows.map((row) => (
+            <div key={row[labelKey]} className="grid gap-2 sm:grid-cols-[90px_1fr_120px] sm:items-center">
+              <span className="text-xs font-bold text-ink/55">{row[labelKey]}</span>
+              <div className="h-3 overflow-hidden rounded-full bg-mist">
+                <div className="h-full rounded-full bg-leaf" style={{ width: `${Math.max(8, (Number(row[valueKey] || 0) / max) * 100)}%` }} />
+              </div>
+              <span className="text-sm font-black sm:text-right">
+                {valueKey === 'revenue' ? currency.format(row[valueKey] || 0) : row[valueKey] || 0}
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-ink/60">Sem dados suficientes.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SuperTable({ title, rows, columns }) {
+  return (
+    <div className="overflow-hidden rounded-md bg-white shadow-sm">
+      <div className="border-b border-ink/10 p-4">
+        <h2 className="text-xl font-black">{title}</h2>
+      </div>
+      <div className="overflow-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-mist text-xs uppercase tracking-wide text-ink/55">
+            <tr>
+              {columns.map((column) => (
+                <th key={column} className="px-4 py-3">
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((row) => (
+                <tr key={row.id || JSON.stringify(row)} className="border-t border-ink/10">
+                  {columns.map((column) => (
+                    <td key={column} className="px-4 py-3">
+                      {column === 'role' ? roleLabels[row[column]] || row[column] : String(row[column] ?? '-')}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-4 py-6 text-center text-ink/60" colSpan={columns.length}>
+                  Nenhum registro encontrado.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({ email: '', password: '', full_name: '', phone: '' });
@@ -1581,7 +2277,8 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
 
     if (!hasSupabaseConfig) {
       if (canUsePasswordAdmin && isAdminEmail(form.email.trim()) && form.password === adminPassword) {
-        const profile = { id: 'local-admin', email: form.email.trim(), role: 'admin', full_name: 'Administrador' };
+        const role = form.email.trim().toLowerCase() === superAdminEmail.toLowerCase() ? 'super_admin' : 'proprietario';
+        const profile = { id: 'local-admin', email: form.email.trim(), role, full_name: 'Administrador' };
         onAuthenticated(profile);
         return;
       }
@@ -1608,7 +2305,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
           email: form.email.trim(),
           full_name: form.full_name,
           phone: form.phone,
-          role: isAdminEmail(form.email.trim()) ? 'admin' : 'client',
+          role: getAuthRole(null, form.email.trim()),
         });
       }
       setNotice('Cadastro criado. Confirme o e-mail se o Supabase solicitar e depois entre normalmente.');
@@ -1815,18 +2512,32 @@ function ClientPortal({ authProfile, reservations, properties, voucherSummary, o
 }
 
 function SuggestionForm({ authProfile, onSubmit }) {
-  const [form, setForm] = useState({ email: authProfile?.email || '', message: '' });
+  const [form, setForm] = useState({ name: authProfile?.full_name || '', email: authProfile?.email || '', message: '' });
+  const [status, setStatus] = useState('idle');
 
   return (
     <form
       className="grid gap-4 rounded-md bg-white p-5 shadow-soft"
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
         if (!form.message.trim()) return;
-        onSubmit(form);
-        setForm({ email: authProfile?.email || '', message: '' });
+        setStatus('loading');
+        try {
+          await onSubmit(form);
+          setStatus('success');
+          setForm({ name: authProfile?.full_name || '', email: authProfile?.email || '', message: '' });
+        } catch {
+          setStatus('error');
+        }
       }}
     >
+      <Field label="Nome">
+        <TextInput
+          value={form.name}
+          onChange={(event) => setForm({ ...form, name: event.target.value })}
+          placeholder="Seu nome"
+        />
+      </Field>
       <Field label="Seu e-mail">
         <TextInput
           type="email"
@@ -1845,8 +2556,10 @@ function SuggestionForm({ authProfile, onSubmit }) {
       </Field>
       <Button type="submit">
         <Mail size={18} />
-        Enviar sugestão
+        {status === 'loading' ? 'Enviando...' : 'Enviar sugestão'}
       </Button>
+      {status === 'success' ? <p className="text-sm font-semibold text-green-700">Sugestão enviada com sucesso.</p> : null}
+      {status === 'error' ? <p className="text-sm font-semibold text-red-700">Não foi possível enviar agora.</p> : null}
     </form>
   );
 }
@@ -2048,10 +2761,13 @@ function AdminPanel({
   onUnlock,
   properties,
   property,
+  propertyLicense,
+  propertyPaymentSettings,
   propertyPhotos,
   registerPayment,
   reservations,
   saveProperty,
+  savePaymentSettings,
   updateReservationDetails,
   updateReservationStatus,
 }) {
@@ -2074,6 +2790,20 @@ function AdminPanel({
     status: 'blocked',
     payment_method: 'cash',
     notes: '',
+  });
+  const [paymentDraft, setPaymentDraft] = useState({
+    pix_key: '',
+    pix_key_type: 'cpf',
+    pix_receiver_name: '',
+    bank_name: '',
+    bank_agency: '',
+    bank_account: '',
+    bank_account_type: 'corrente',
+    bank_holder: '',
+    bank_document: '',
+    card_payment_url: '',
+    max_installments: 4,
+    payment_instructions: '',
   });
   const [draft, setDraft] = useState({
     ...property,
@@ -2135,7 +2865,22 @@ function AdminPanel({
       rules: property.rules?.join('\n') || '',
     });
     setPhoto({ url: '', alt: '' });
-  }, [property]);
+    setPaymentDraft({
+      pix_key: propertyPaymentSettings?.pix_key || '',
+      pix_key_type: propertyPaymentSettings?.pix_key_type || 'cpf',
+      pix_receiver_name: propertyPaymentSettings?.pix_receiver_name || '',
+      bank_name: propertyPaymentSettings?.bank_name || '',
+      bank_agency: propertyPaymentSettings?.bank_agency || '',
+      bank_account: propertyPaymentSettings?.bank_account || '',
+      bank_account_type: propertyPaymentSettings?.bank_account_type || 'corrente',
+      bank_holder: propertyPaymentSettings?.bank_holder || '',
+      bank_document: propertyPaymentSettings?.bank_document || '',
+      card_payment_url: propertyPaymentSettings?.card_payment_url || '',
+      max_installments: propertyPaymentSettings?.max_installments || 4,
+      payment_instructions: propertyPaymentSettings?.payment_instructions || '',
+      id: propertyPaymentSettings?.id,
+    });
+  }, [property, propertyPaymentSettings]);
 
   function submitProperty(event) {
     event.preventDefault();
@@ -2180,7 +2925,7 @@ function AdminPanel({
     updateReservationStatus(reservation.id, 'confirmed');
     const whatsAppUrl = buildWhatsAppUrl(
       reservation.guest_phone,
-      buildGuestConfirmationMessage(property, reservation),
+      buildGuestConfirmationMessage(property, reservation, propertyPaymentSettings),
     );
     if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
   }
@@ -2558,6 +3303,48 @@ function AdminPanel({
     doc.save(`${property.name}-${reportType}.pdf`.replace(/\s+/g, '-').toLowerCase());
   }
 
+  const ownerPanelBlocked =
+    adminUnlocked &&
+    authProfile?.role !== 'super_admin' &&
+    propertyLicense &&
+    ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense));
+
+  if (ownerPanelBlocked) {
+    return (
+      <div className="fixed inset-0 z-40 bg-ink/55 p-3 backdrop-blur-sm">
+        <div className="ml-auto h-full max-w-3xl overflow-auto rounded-md bg-[#f4f8ff] shadow-soft">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-5 py-4 text-white">
+            <div>
+              <h2 className="text-2xl font-black">Administração</h2>
+              <p className="text-sm text-white/75">Acesso temporariamente bloqueado.</p>
+            </div>
+            <Button variant="outline" onClick={onClose} aria-label="Fechar painel">
+              <X size={18} />
+            </Button>
+          </div>
+          <div className="grid h-[calc(100%-76px)] place-items-center p-5">
+            <div className="max-w-lg rounded-md border border-red-200 bg-red-50 p-6 text-red-800 shadow-sm">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-1 shrink-0" />
+                <div>
+                  <h3 className="text-2xl font-black">Licença {licenseStatusLabels[normalizeLicenseStatus(propertyLicense)]}</h3>
+                  <p className="mt-2 text-sm leading-6">
+                    O painel do proprietário está bloqueado até a regularização da licença. As reservas públicas também ficam pausadas
+                    quando a licença está vencida ou suspensa.
+                  </p>
+                  <p className="mt-3 text-sm font-bold">Vencimento: {propertyLicense.expires_at || '-'}</p>
+                </div>
+              </div>
+              <Button className="mt-5" type="button" variant="secondary" onClick={onClose}>
+                Entendi
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-40 bg-ink/55 p-3 backdrop-blur-sm">
       <div className="ml-auto h-full max-w-3xl overflow-auto rounded-md bg-[#f4f8ff] shadow-soft">
@@ -2579,7 +3366,11 @@ function AdminPanel({
               setLoginError('');
               setLoginNotice('');
 
-              if (canUsePasswordAdmin && isAdminEmail(login.email.trim()) && login.password === adminPassword) {
+              if (
+                canUsePasswordAdmin &&
+                [adminEmail.toLowerCase(), superAdminEmail.toLowerCase()].includes(login.email.trim().toLowerCase()) &&
+                login.password === adminPassword
+              ) {
                 onUnlock();
                 return;
               }
@@ -2595,9 +3386,9 @@ function AdminPanel({
                   return;
                 }
                 if (error) setLoginError('Login nao autorizado. Confira e-mail e senha.');
-                if (data?.user && !isAdminEmail(data.user.email)) {
+                if (data?.user && !['proprietario', 'admin', 'super_admin'].includes(getAuthRole(null, data.user.email))) {
                   await supabase.auth.signOut();
-                  setLoginError('Este e-mail não tem permissão de administrador.');
+                  setLoginError('Este e-mail não tem permissão de proprietário.');
                 }
                 return;
               }
@@ -2699,6 +3490,20 @@ function AdminPanel({
                   Sair
                 </Button>
               </div>
+            ) : null}
+            {authProfile?.role !== 'super_admin' && propertyLicense && ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense)) ? (
+              <section className="grid gap-3 rounded-md border border-red-200 bg-red-50 p-5 text-red-800 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-1 shrink-0" />
+                  <div>
+                    <h3 className="text-xl font-black">Licença indisponível</h3>
+                    <p className="mt-1 text-sm leading-6">
+                      Seu painel está temporariamente bloqueado porque a licença está {licenseStatusLabels[normalizeLicenseStatus(propertyLicense)]?.toLowerCase()}.
+                      Entre em contato com o suporte para regularizar o acesso.
+                    </p>
+                  </div>
+                </div>
+              </section>
             ) : null}
             {adminView === 'dashboard' ? (
               <section className="grid gap-5 rounded-md bg-white p-4 shadow-sm">
@@ -3226,6 +4031,18 @@ function AdminPanel({
                       onChange={(event) => setManualReservation({ ...manualReservation, total_amount: event.target.value })}
                     />
                   </Field>
+                  <Field label="Pagamento">
+                    <SelectInput
+                      value={manualReservation.payment_method}
+                      onChange={(event) => setManualReservation({ ...manualReservation, payment_method: event.target.value })}
+                    >
+                      <option value="pix">Pix</option>
+                      <option value="card">Cartão</option>
+                      <option value="transfer">Transferência</option>
+                      <option value="cash">Dinheiro</option>
+                      <option value="check">Cheque</option>
+                    </SelectInput>
+                  </Field>
                 </div>
                 <Field label="Observações internas">
                   <TextArea
@@ -3402,6 +4219,88 @@ function AdminPanel({
                     Salvar juros
                   </Button>
                 </div>
+                <form
+                  className="grid gap-4 rounded-md bg-[#f4f8ff] p-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    savePaymentSettings(paymentDraft);
+                  }}
+                >
+                  <div>
+                    <h4 className="font-black">Configurações financeiras do proprietário</h4>
+                    <p className="mt-1 text-sm text-ink/65">Esses dados entram automaticamente na confirmação enviada ao hóspede.</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Chave Pix">
+                      <TextInput value={paymentDraft.pix_key} onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_key: event.target.value })} />
+                    </Field>
+                    <Field label="Tipo da chave Pix">
+                      <SelectInput value={paymentDraft.pix_key_type} onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_key_type: event.target.value })}>
+                        <option value="cpf">CPF</option>
+                        <option value="cnpj">CNPJ</option>
+                        <option value="email">E-mail</option>
+                        <option value="phone">Telefone</option>
+                        <option value="random">Aleatória</option>
+                      </SelectInput>
+                    </Field>
+                    <Field label="Nome do recebedor">
+                      <TextInput
+                        value={paymentDraft.pix_receiver_name}
+                        onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_receiver_name: event.target.value })}
+                      />
+                    </Field>
+                    <Field label="Banco">
+                      <TextInput value={paymentDraft.bank_name} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_name: event.target.value })} />
+                    </Field>
+                    <Field label="Agência">
+                      <TextInput value={paymentDraft.bank_agency} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_agency: event.target.value })} />
+                    </Field>
+                    <Field label="Conta">
+                      <TextInput value={paymentDraft.bank_account} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_account: event.target.value })} />
+                    </Field>
+                    <Field label="Tipo de conta">
+                      <SelectInput
+                        value={paymentDraft.bank_account_type}
+                        onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_account_type: event.target.value })}
+                      >
+                        <option value="corrente">Corrente</option>
+                        <option value="poupanca">Poupança</option>
+                        <option value="pagamento">Pagamento</option>
+                      </SelectInput>
+                    </Field>
+                    <Field label="Titular">
+                      <TextInput value={paymentDraft.bank_holder} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_holder: event.target.value })} />
+                    </Field>
+                    <Field label="CPF/CNPJ">
+                      <TextInput value={paymentDraft.bank_document} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_document: event.target.value })} />
+                    </Field>
+                    <Field label="Link de pagamento cartão">
+                      <TextInput
+                        value={paymentDraft.card_payment_url}
+                        onChange={(event) => setPaymentDraft({ ...paymentDraft, card_payment_url: event.target.value })}
+                        placeholder="https://..."
+                      />
+                    </Field>
+                    <Field label="Máximo de parcelas">
+                      <TextInput
+                        type="number"
+                        min="1"
+                        value={paymentDraft.max_installments}
+                        onChange={(event) => setPaymentDraft({ ...paymentDraft, max_installments: event.target.value })}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Instruções de pagamento">
+                    <TextArea
+                      value={paymentDraft.payment_instructions}
+                      onChange={(event) => setPaymentDraft({ ...paymentDraft, payment_instructions: event.target.value })}
+                    />
+                  </Field>
+                  <Button type="submit" variant="secondary">
+                    <Save size={18} />
+                    Salvar dados financeiros
+                  </Button>
+                </form>
                 <div className="rounded-md bg-[#f4f8ff] p-4">
                   <p className="font-black">Sugestões recebidas</p>
                   <div className="mt-3 grid gap-2">

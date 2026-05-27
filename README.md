@@ -16,9 +16,11 @@ npm run dev
 3. Crie pelo menos uma linha na tabela `properties`.
 4. Adicione fotos pelo painel Admin. Com Supabase configurado, o upload usa o bucket `property-photos`.
 5. Crie usuários em Authentication. O SQL cria automaticamente a tabela `profiles` e o trigger de perfil:
-   - Cliente: `profiles.role = 'client'`.
-   - Admin: altere o perfil para `profiles.role = 'admin'`.
-   - O e-mail `glawcksilva8@gmail.com` já nasce como admin pelo trigger do schema.
+   - Super Admin: `profiles.role = 'super_admin'`.
+   - Proprietário: `profiles.role = 'proprietario'`.
+   - Hóspede: `profiles.role = 'hospede'`.
+   - O e-mail `glawcksilva55@gmail.com` já nasce como Super Admin.
+   - O e-mail `glawcksilva8@gmail.com` já nasce como proprietário.
 6. Em Authentication > URL Configuration, configure:
    - Site URL: `http://127.0.0.1:5173` em desenvolvimento, ou a URL publicada do site.
    - Redirect URLs: `http://127.0.0.1:5173/**` e a URL publicada do site com `/**`.
@@ -28,7 +30,11 @@ npm run dev
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_ANON_KEY=sua-chave-anon-publica
 VITE_OWNER_WHATSAPP=43998108328
+VITE_OWNER_EMAIL=proprietario@email.com
 VITE_ADMIN_EMAIL=glawcksilva8@gmail.com
+VITE_SUPER_ADMIN_EMAIL=glawcksilva55@gmail.com
+VITE_COMMERCIAL_EMAIL=hospedex1@gmail.com
+VITE_ADMIN_PASSWORD=sua-senha-do-painel-admin
 VITE_LOCAL_ADMIN_PASSWORD=senha-apenas-para-desenvolvimento-local
 ```
 
@@ -39,7 +45,17 @@ Para pagamentos online, configure estes segredos na Edge Function do Supabase, n
 ```bash
 supabase secrets set MERCADO_PAGO_ACCESS_TOKEN=seu-access-token
 supabase functions deploy create-payment-preference
+supabase secrets set RESEND_API_KEY=sua-chave-resend
+supabase secrets set COMMERCIAL_EMAIL=hospedex1@gmail.com
+supabase functions deploy send-suggestion-email
 ```
+
+## Rotas privadas
+
+- `/login`: login/cadastro único.
+- `/super-admin`: área privada do Super Admin. Não aparece em menus públicos e exige `profiles.role = 'super_admin'`.
+- `/admin`: painel do proprietário. Exige `profiles.role = 'proprietario'`.
+- `/hospede`: portal do hóspede. Exige `profiles.role = 'hospede'`.
 
 ## Fotos
 
