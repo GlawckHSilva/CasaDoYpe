@@ -64,6 +64,10 @@ const adminEmailAliases = (import.meta.env.VITE_ADMIN_EMAIL_ALIASES || '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
+const legacyRoleMap = {
+  admin: 'proprietario',
+  client: 'hospede',
+};
 const localAdminPassword = import.meta.env.VITE_LOCAL_ADMIN_PASSWORD || '';
 const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
 const canUsePasswordAdmin = Boolean(adminPassword);
@@ -280,12 +284,14 @@ function buildOwnerEmailUrl({ ownerEmail, property, reservation, nights }) {
 }
 
 function buildGuestConfirmationMessage(property, reservation, paymentSettings) {
+  const cardPaymentUrl = reservation.payment_url || paymentSettings?.card_payment_url;
   const paymentNoticeByMethod = {
     pix: [
       'Pagamento por Pix:',
       paymentSettings?.pix_receiver_name ? `Recebedor: ${paymentSettings.pix_receiver_name}` : null,
       paymentSettings?.pix_key_type ? `Tipo da chave: ${paymentSettings.pix_key_type}` : null,
       paymentSettings?.pix_key ? `Chave Pix: ${paymentSettings.pix_key}` : null,
+      reservation.payment_url ? `Link de pagamento: ${reservation.payment_url}` : null,
       `Valor: ${currency.format(reservation.total_amount || 0)}`,
       paymentSettings?.payment_instructions || 'Envie o comprovante após o pagamento.',
     ],
@@ -293,9 +299,9 @@ function buildGuestConfirmationMessage(property, reservation, paymentSettings) {
       'Pagamento por cartão:',
       reservation.installments ? `Parcelamento: ${reservation.installments}x` : null,
       reservation.interest_rate ? `Juros aplicado: ${reservation.interest_rate}%` : null,
-      paymentSettings?.card_payment_url ? `Link de pagamento: ${paymentSettings.card_payment_url}` : null,
+      cardPaymentUrl ? `Link de pagamento: ${cardPaymentUrl}` : null,
       `Valor total: ${currency.format(reservation.total_amount || 0)}`,
-      paymentSettings?.card_payment_url ? null : 'O proprietário enviará o link de pagamento.',
+      cardPaymentUrl ? null : 'O proprietário enviará o link de pagamento.',
     ],
     transfer: [
       'Transferência bancária:',
@@ -356,19 +362,27 @@ function parseAdminList(value) {
     .filter(Boolean);
 }
 
+function normalizeRole(role) {
+  const normalized = String(role || '').toLowerCase();
+  return legacyRoleMap[normalized] || normalized;
+}
+
+function isSuperAdminEmail(email) {
+  return String(email || '').toLowerCase() === superAdminEmail.toLowerCase();
+}
+
 function getAuthRole(profile, email) {
   const normalizedEmail = String(email || '').toLowerCase();
   if (normalizedEmail === superAdminEmail.toLowerCase()) return 'super_admin';
-  if (profile?.role === 'admin') return 'proprietario';
-  if (profile?.role === 'client') return 'hospede';
-  if (profile?.role) return profile.role;
+  if (profile?.role) return normalizeRole(profile.role);
   if (isAdminEmail(email)) return 'proprietario';
   return 'hospede';
 }
 
 function roleHomePath(role) {
-  if (role === 'super_admin') return '/super-admin';
-  if (role === 'proprietario' || role === 'admin') return '/admin';
+  const normalizedRole = normalizeRole(role);
+  if (normalizedRole === 'super_admin') return '/super-admin';
+  if (normalizedRole === 'proprietario') return '/admin';
   return '/hospede';
 }
 
@@ -443,6 +457,10 @@ function isAdminEmail(email) {
   return normalized === adminEmail.toLowerCase() || adminEmailAliases.includes(normalized);
 }
 
+function isPrivilegedEmail(email) {
+  return isSuperAdminEmail(email) || isAdminEmail(email);
+}
+
 function scrollToSection(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -487,7 +505,7 @@ function Field({ label, children }) {
 function TextInput(props) {
   return (
     <input
-      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-ink shadow-sm transition placeholder:text-ink/40"
+      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:text-sm"
       {...props}
     />
   );
@@ -496,7 +514,7 @@ function TextInput(props) {
 function TextArea(props) {
   return (
     <textarea
-      className="min-h-24 rounded-md border border-ink/15 bg-white px-3 py-2 text-ink shadow-sm transition placeholder:text-ink/40"
+      className="min-h-24 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:text-sm"
       {...props}
     />
   );
@@ -505,7 +523,7 @@ function TextArea(props) {
 function SelectInput({ children, ...props }) {
   return (
     <select
-      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-ink shadow-sm transition"
+      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition sm:text-sm"
       {...props}
     >
       {children}
@@ -524,6 +542,7 @@ export default function App() {
   const [interestRates, setInterestRates] = useState(() => readLocalData('interestRates', defaultInterestRates));
   const [profiles, setProfiles] = useState(() => readLocalData('profiles', []));
   const [licenses, setLicenses] = useState(() => readLocalData('licenses', []));
+  const [licenseHistory, setLicenseHistory] = useState(() => readLocalData('licenseHistory', []));
   const [paymentSettings, setPaymentSettings] = useState(() => readLocalData('paymentSettings', []));
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [heroPhotoIndex, setHeroPhotoIndex] = useState(0);
@@ -570,6 +589,27 @@ export default function App() {
       null,
     [paymentSettings, property.id, property.owner_id],
   );
+  const adminProperties = useMemo(() => {
+    if (!authProfile) return properties;
+    if (normalizeRole(authProfile.role) === 'super_admin') return properties;
+    const email = String(authProfile.email || '').toLowerCase();
+    const ownedProperties = properties.filter(
+      (item) =>
+        item.owner_id === authProfile.id ||
+        String(item.owner_email || '').toLowerCase() === email ||
+        (!item.owner_id && isAdminEmail(email)),
+    );
+    return ownedProperties.length ? ownedProperties : [];
+  }, [authProfile, properties]);
+  const adminProperty = adminProperties.find((item) => item.id === property.id) || adminProperties[0] || property;
+  const adminPropertyPaymentSettings =
+    paymentSettings.find((setting) => setting.property_id === adminProperty.id) ||
+    paymentSettings.find((setting) => setting.owner_id && setting.owner_id === adminProperty.owner_id) ||
+    null;
+  const adminPropertyLicense =
+    licenses.find((license) => license.property_id === adminProperty.id) ||
+    licenses.find((license) => license.owner_id && license.owner_id === adminProperty.owner_id) ||
+    null;
   const propertyPhotos = useMemo(
     () => photos.filter((photo) => photo.property_id === property.id).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
     [photos, property.id],
@@ -582,6 +622,28 @@ export default function App() {
     () => cashMovements.filter((movement) => movement.property_id === property.id),
     [cashMovements, property.id],
   );
+  const adminPropertyPhotos = useMemo(
+    () => photos.filter((photo) => photo.property_id === adminProperty.id).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
+    [photos, adminProperty.id],
+  );
+  const adminPropertyReservations = useMemo(
+    () => reservations.filter((reservation) => reservation.property_id === adminProperty.id),
+    [reservations, adminProperty.id],
+  );
+  const adminPropertyCashMovements = useMemo(
+    () => cashMovements.filter((movement) => movement.property_id === adminProperty.id),
+    [cashMovements, adminProperty.id],
+  );
+  const adminFinancialSummary = useMemo(() => {
+    const received = adminPropertyCashMovements
+      .filter((movement) => movement.type === 'income' && movement.status === 'received')
+      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const receivable = adminPropertyReservations
+      .filter((reservation) => ['pending', 'confirmed'].includes(reservation.status))
+      .filter((reservation) => reservation.payment_status !== 'paid')
+      .reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
+    return { received, receivable, forecast: received + receivable };
+  }, [adminPropertyCashMovements, adminPropertyReservations]);
   const selectedPhotoData = propertyPhotos[selectedPhoto] || propertyPhotos[0] || demoPhotos[0];
   const heroPhoto = propertyPhotos[heroPhotoIndex] || selectedPhotoData;
   const calendarAvailability = useMemo(() => getCalendarAvailability(propertyReservations), [propertyReservations]);
@@ -597,7 +659,9 @@ export default function App() {
   );
   const finalBookingTotal = booking.payment_method === 'card' ? cardQuote.finalTotal : total;
   const reservationConflict = hasConflict(propertyReservations, booking.check_in, booking.check_out);
-  const licenseValid = isLicenseValid(property) && (!propertyLicense || normalizeLicenseStatus(propertyLicense) !== 'expired');
+  const propertyLicenseStatus = normalizeLicenseStatus(propertyLicense);
+  const licenseValid =
+    isLicenseValid(property) && (!propertyLicense || !['expired', 'suspended'].includes(propertyLicenseStatus));
   const voucherSummary = useMemo(() => getVoucherSummary(propertyReservations), [propertyReservations]);
   const financialSummary = useMemo(() => {
     const received = propertyCashMovements
@@ -637,6 +701,7 @@ export default function App() {
       { data: interestRows },
       { data: profileRows },
       { data: licenseRows },
+      { data: licenseHistoryRows },
       { data: paymentSettingRows },
     ] =
       await Promise.all([
@@ -647,6 +712,7 @@ export default function App() {
         supabase.from('interest_settings').select('*').eq('active', true).order('installments'),
         supabase.from('profiles').select('*').order('created_at'),
         supabase.from('licenses').select('*').order('expires_at', { ascending: true }),
+        supabase.from('license_history').select('*').order('created_at', { ascending: false }),
         supabase.from('payment_settings').select('*').order('created_at'),
       ]);
 
@@ -662,6 +728,7 @@ export default function App() {
     }
     if (profileRows?.length) setProfiles(profileRows);
     if (licenseRows?.length) setLicenses(licenseRows);
+    if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
     if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
     setLoading(false);
   }
@@ -705,7 +772,7 @@ export default function App() {
 
     setAdminSession(session);
     setAuthProfile(profile);
-    setAdminUnlocked(['proprietario', 'admin', 'super_admin'].includes(profile.role));
+    setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
     setAuthChecked(true);
     return profile;
   }
@@ -746,13 +813,13 @@ export default function App() {
 
     supabase.auth.getSession().then(async ({ data }) => {
       const profile = await resolveAuthProfile(data.session);
-      if (profile?.role === 'admin') loadSupabaseData();
+      if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
     });
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') setPasswordRecoveryOpen(true);
       const profile = await resolveAuthProfile(session);
-      if (profile?.role === 'admin') loadSupabaseData();
+      if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
     });
 
     return () => data.subscription.unsubscribe();
@@ -810,6 +877,11 @@ export default function App() {
 
   useEffect(() => {
     if (hasSupabaseConfig) return;
+    writeLocalData('licenseHistory', licenseHistory);
+  }, [licenseHistory]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
     writeLocalData('paymentSettings', paymentSettings);
   }, [paymentSettings]);
 
@@ -825,31 +897,31 @@ export default function App() {
       navigateTo('/login');
       return;
     }
-    if (route === '/super-admin' && authProfile?.role !== 'super_admin') {
+    if (route === '/super-admin' && normalizeRole(authProfile?.role) !== 'super_admin') {
       navigateTo(roleHomePath(authProfile?.role));
       return;
     }
-    if (route === '/admin' && !['proprietario', 'admin', 'super_admin'].includes(authProfile?.role)) {
+    if (route === '/admin' && !['proprietario', 'super_admin'].includes(normalizeRole(authProfile?.role))) {
       navigateTo(roleHomePath(authProfile?.role));
       return;
     }
-    if (route === '/hospede' && !['hospede', 'client', 'super_admin'].includes(authProfile?.role)) {
+    if (route === '/hospede' && !['hospede', 'super_admin'].includes(normalizeRole(authProfile?.role))) {
       navigateTo(roleHomePath(authProfile?.role));
     }
   }, [route, authProfile, authChecked]);
 
   useEffect(() => {
     if (!authProfile) return;
-    if (route === '/admin' && ['proprietario', 'admin', 'super_admin'].includes(authProfile.role)) {
+    if (route === '/admin' && ['proprietario', 'super_admin'].includes(normalizeRole(authProfile.role))) {
       setAdminOpen(true);
     }
-    if (route === '/hospede' && ['hospede', 'client', 'super_admin'].includes(authProfile.role)) {
+    if (route === '/hospede' && ['hospede', 'super_admin'].includes(normalizeRole(authProfile.role))) {
       setClientPortalOpen(true);
     }
   }, [route, authProfile]);
 
   useEffect(() => {
-    if (!['hospede', 'client'].includes(authProfile?.role)) return;
+    if (normalizeRole(authProfile?.role) !== 'hospede') return;
     setBooking((current) => ({
       ...current,
       guest_name: current.guest_name || authProfile.full_name || '',
@@ -857,6 +929,14 @@ export default function App() {
       guest_phone: current.guest_phone || authProfile.phone || '',
     }));
   }, [authProfile]);
+
+  useEffect(() => {
+    if (route !== '/admin' || !authProfile || normalizeRole(authProfile.role) === 'super_admin') return;
+    if (!adminProperties.length) return;
+    if (!adminProperties.some((item) => item.id === selectedPropertyId)) {
+      setSelectedPropertyId(adminProperties[0].id);
+    }
+  }, [route, authProfile, adminProperties, selectedPropertyId]);
 
   useEffect(() => {
     if (propertyPhotos.length <= 1) return undefined;
@@ -872,7 +952,7 @@ export default function App() {
 
     const reservation = {
       property_id: property.id,
-      guest_user_id: authProfile?.role === 'hospede' ? authProfile.id : null,
+      guest_user_id: normalizeRole(authProfile?.role) === 'hospede' ? authProfile.id : null,
       ...booking,
       guests: Number(booking.guests),
       installments: Number(booking.payment_method === 'card' ? booking.installments : 1),
@@ -914,9 +994,9 @@ export default function App() {
       check_in: '',
       check_out: '',
       guests: 2,
-      guest_name: authProfile?.role === 'client' ? authProfile.full_name || '' : '',
-      guest_email: authProfile?.role === 'client' ? authProfile.email || '' : '',
-      guest_phone: authProfile?.role === 'client' ? authProfile.phone || '' : '',
+      guest_name: normalizeRole(authProfile?.role) === 'hospede' ? authProfile.full_name || '' : '',
+      guest_email: normalizeRole(authProfile?.role) === 'hospede' ? authProfile.email || '' : '',
+      guest_phone: normalizeRole(authProfile?.role) === 'hospede' ? authProfile.phone || '' : '',
       guest_document: '',
       payment_method: 'pix',
       installments: 1,
@@ -1127,7 +1207,6 @@ export default function App() {
           ? {
               ...reservation,
               status,
-              payment_status: status === 'confirmed' ? 'paid' : reservation.payment_status,
             }
           : reservation,
       ),
@@ -1135,7 +1214,6 @@ export default function App() {
 
     if (hasSupabaseConfig) {
       const updatePayload = { status };
-      if (status === 'confirmed') updatePayload.payment_status = 'paid';
 
       await supabase
         .from('reservations')
@@ -1268,8 +1346,12 @@ export default function App() {
     setSuggestions((current) => [payload, ...current]);
     if (hasSupabaseConfig) {
       const { id, ...insertable } = payload;
-      await supabase.from('suggestions').insert(insertable);
-      await supabase.functions.invoke('send-suggestion-email', {
+      const { error: insertError } = await supabase.from('suggestions').insert(insertable);
+      if (insertError) {
+        setSuggestions((current) => current.filter((item) => item.id !== id));
+        throw insertError;
+      }
+      const { error: emailError } = await supabase.functions.invoke('send-suggestion-email', {
         body: {
           name: payload.name,
           email: payload.user_email,
@@ -1278,6 +1360,7 @@ export default function App() {
           propertyName: property.name,
         },
       });
+      if (emailError) throw emailError;
     }
     const emailUrl = `mailto:${encodeURIComponent(commercialEmail)}?subject=${encodeURIComponent(
       `Sugestão para ${property.name}`,
@@ -1302,7 +1385,7 @@ export default function App() {
           onClose={() => navigateTo('/')}
           onAuthenticated={(profile) => {
             setAuthProfile(profile);
-            setAdminUnlocked(['proprietario', 'admin', 'super_admin'].includes(profile.role));
+            setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
             navigateTo(roleHomePath(profile.role));
           }}
           resolveAuthProfile={resolveAuthProfile}
@@ -1315,7 +1398,7 @@ export default function App() {
     if (!authChecked) {
       return <div className="grid min-h-screen place-items-center bg-[#f4f8ff] font-bold text-ink">Validando acesso...</div>;
     }
-    if (authProfile?.role !== 'super_admin') {
+    if (normalizeRole(authProfile?.role) !== 'super_admin') {
       return (
         <AccessDenied
           title="Acesso restrito"
@@ -1333,6 +1416,10 @@ export default function App() {
         cashMovements={cashMovements}
         licenses={licenses}
         setLicenses={setLicenses}
+        licenseHistory={licenseHistory}
+        setLicenseHistory={setLicenseHistory}
+        setProfiles={setProfiles}
+        setProperties={setProperties}
         authProfile={authProfile}
         onSignOut={signOut}
         onHome={() => navigateTo('/')}
@@ -1373,18 +1460,18 @@ export default function App() {
             >
               {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </Button>
-            {['hospede', 'client'].includes(authProfile?.role) ? (
+            {normalizeRole(authProfile?.role) === 'hospede' ? (
               <Button variant="outline" onClick={() => navigateTo('/hospede')}>
-                <User size={18} />
+                <MaterialIcon name="account_circle" size={18} />
                 Portal
               </Button>
             ) : null}
             <Button
               variant="outline"
               onClick={() => {
-                if (authProfile?.role === 'super_admin') {
+                if (normalizeRole(authProfile?.role) === 'super_admin') {
                   navigateTo('/super-admin');
-                } else if (['proprietario', 'admin'].includes(authProfile?.role) || adminUnlocked) {
+                } else if (normalizeRole(authProfile?.role) === 'proprietario' || adminUnlocked) {
                   navigateTo('/admin');
                 } else {
                   navigateTo('/login');
@@ -1393,7 +1480,7 @@ export default function App() {
               aria-label="Abrir administracao"
               className="px-3"
             >
-              <User size={18} />
+              <MaterialIcon name="person" size={18} />
             </Button>
           </div>
         </div>
@@ -1826,14 +1913,14 @@ export default function App() {
           onClose={() => setAdminOpen(false)}
           onUnlock={() => setAdminUnlocked(true)}
           onSelectProperty={selectProperty}
-          properties={properties}
-          property={property}
-          propertyLicense={propertyLicense}
-          propertyPaymentSettings={propertyPaymentSettings}
-          propertyPhotos={propertyPhotos}
-          reservations={propertyReservations}
-          cashMovements={propertyCashMovements}
-          financialSummary={financialSummary}
+          properties={adminProperties}
+          property={adminProperty}
+          propertyLicense={adminPropertyLicense}
+          propertyPaymentSettings={adminPropertyPaymentSettings}
+          propertyPhotos={adminPropertyPhotos}
+          reservations={adminPropertyReservations}
+          cashMovements={adminPropertyCashMovements}
+          financialSummary={adminFinancialSummary}
           interestRates={interestRates}
           setInterestRates={setInterestRates}
           saveInterestRates={saveInterestRates}
@@ -1843,6 +1930,7 @@ export default function App() {
           onSignOut={signOut}
           addAdminLog={addAdminLog}
           createManualReservation={createManualReservation}
+          createPaymentLink={createPaymentLink}
           reorderPhoto={reorderPhoto}
           registerPayment={registerPayment}
           saveProperty={saveProperty}
@@ -1857,11 +1945,11 @@ export default function App() {
           onClose={() => setAuthOpen(false)}
           onAuthenticated={(profile) => {
             setAuthProfile(profile);
-            setAdminUnlocked(['proprietario', 'admin', 'super_admin'].includes(profile.role));
+            setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
             setAuthOpen(false);
             navigateTo(roleHomePath(profile.role));
-            if (profile.role === 'proprietario' || profile.role === 'admin') setAdminOpen(true);
-            if (profile.role === 'hospede' || profile.role === 'client') setClientPortalOpen(true);
+            if (normalizeRole(profile.role) === 'proprietario') setAdminOpen(true);
+            if (normalizeRole(profile.role) === 'hospede') setClientPortalOpen(true);
           }}
           resolveAuthProfile={resolveAuthProfile}
         />
@@ -1921,6 +2009,10 @@ function SuperAdminDashboard({
   cashMovements,
   licenses,
   setLicenses,
+  licenseHistory,
+  setLicenseHistory,
+  setProfiles,
+  setProperties,
   authProfile,
   onSignOut,
   onHome,
@@ -1928,6 +2020,8 @@ function SuperAdminDashboard({
 }) {
   const [view, setView] = useState('dashboard');
   const [query, setQuery] = useState('');
+  const [licenseEdits, setLicenseEdits] = useState({});
+  const [userNotice, setUserNotice] = useState('');
   const [licenseDraft, setLicenseDraft] = useState({
     owner_id: '',
     property_id: '',
@@ -1940,8 +2034,8 @@ function SuperAdminDashboard({
     notes: '',
   });
 
-  const owners = profiles.filter((profile) => ['proprietario', 'admin'].includes(profile.role));
-  const guests = profiles.filter((profile) => ['hospede', 'client'].includes(profile.role));
+  const owners = profiles.filter((profile) => normalizeRole(profile.role) === 'proprietario');
+  const guests = profiles.filter((profile) => normalizeRole(profile.role) === 'hospede');
   const visibleLicenses = licenses.filter((license) => {
     const owner = profiles.find((profile) => profile.id === license.owner_id);
     const property = properties.find((item) => item.id === license.property_id);
@@ -1958,6 +2052,7 @@ function SuperAdminDashboard({
     cancelled: reservations.filter((reservation) => reservation.status === 'cancelled').length,
     activeLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'active').length,
     expiredLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'expired').length,
+    activeClients: licenses.filter((license) => ['active', 'trial'].includes(normalizeLicenseStatus(license))).length,
     monthlyRevenue: cashMovements
       .filter((movement) => String(movement.due_date || '').slice(0, 7) === format(new Date(), 'yyyy-MM'))
       .reduce((sum, movement) => sum + Number(movement.amount || 0), 0),
@@ -1966,6 +2061,7 @@ function SuperAdminDashboard({
   const growthChart = buildGrowthRows(profiles);
   const menu = [
     ['dashboard', 'Dashboard', 'dashboard'],
+    ['users', 'Usuários', 'admin_panel_settings'],
     ['owners', 'Proprietários', 'manage_accounts'],
     ['guests', 'Hóspedes', 'group'],
     ['licenses', 'Licenças', 'vpn_key'],
@@ -1973,6 +2069,48 @@ function SuperAdminDashboard({
     ['financial', 'Financeiro', 'payments'],
     ['settings', 'Configurações', 'settings'],
   ];
+
+  function syncPropertyLicense(savedLicense) {
+    if (!savedLicense?.property_id) return;
+    const status = normalizeLicenseStatus(savedLicense);
+    setProperties((current) =>
+      current.map((item) =>
+        item.id === savedLicense.property_id
+          ? {
+              ...item,
+              license_key: savedLicense.license_key,
+              license_expires_at: savedLicense.expires_at || '',
+              license_active: ['active', 'trial'].includes(status),
+            }
+          : item,
+      ),
+    );
+  }
+
+  function rememberLicenseHistory(entry) {
+    setLicenseHistory((current) => [{ id: crypto.randomUUID(), created_at: new Date().toISOString(), ...entry }, ...current]);
+  }
+
+  async function updateUserRole(profile, role) {
+    const normalizedRole = normalizeRole(role);
+    if (!profile?.id || !['super_admin', 'proprietario', 'hospede'].includes(normalizedRole)) return;
+    if (isSuperAdminEmail(profile.email) && normalizedRole !== 'super_admin') {
+      setUserNotice('O e-mail principal de Super Admin não pode ser rebaixado.');
+      return;
+    }
+
+    setProfiles((current) => current.map((item) => (item.id === profile.id ? { ...item, role: normalizedRole } : item)));
+    if (hasSupabaseConfig) {
+      const { error } = await supabase.from('profiles').update({ role: normalizedRole }).eq('id', profile.id);
+      if (error) {
+        setProfiles((current) => current.map((item) => (item.id === profile.id ? profile : item)));
+        setUserNotice('Não foi possível alterar a permissão. Confira as policies do Supabase.');
+        return;
+      }
+    }
+    setUserNotice(`${profile.email} atualizado para ${roleLabels[normalizedRole] || normalizedRole}.`);
+    await addAdminLog('super_admin_role_updated', { user_id: profile.id, email: profile.email, role: normalizedRole });
+  }
 
   async function upsertLicense(payload) {
     const normalized = {
@@ -1993,13 +2131,16 @@ function SuperAdminDashboard({
       const exists = current.some((item) => item.id === saved.id);
       return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current];
     });
+    syncPropertyLicense(saved);
+    const historyEntry = {
+      license_id: saved.id,
+      action: payload.id ? 'updated' : 'created',
+      actor_email: authProfile?.email,
+      details: { status: saved.status, plan: saved.plan, expires_at: saved.expires_at },
+    };
+    rememberLicenseHistory(historyEntry);
     if (hasSupabaseConfig) {
-      await supabase.from('license_history').insert({
-        license_id: saved.id,
-        action: payload.id ? 'updated' : 'created',
-        actor_email: authProfile?.email,
-        details: { status: saved.status, plan: saved.plan, expires_at: saved.expires_at },
-      });
+      await supabase.from('license_history').insert(historyEntry);
     }
     await addAdminLog('super_admin_license_saved', { license_id: saved.id, status: saved.status });
   }
@@ -2009,7 +2150,17 @@ function SuperAdminDashboard({
   }
 
   async function deleteLicense(licenseId) {
+    const deletedLicense = licenses.find((license) => license.id === licenseId);
     setLicenses((current) => current.filter((license) => license.id !== licenseId));
+    if (deletedLicense?.property_id) {
+      setProperties((current) =>
+        current.map((item) =>
+          item.id === deletedLicense.property_id
+            ? { ...item, license_key: '', license_expires_at: '', license_active: false }
+            : item,
+        ),
+      );
+    }
     if (hasSupabaseConfig) await supabase.from('licenses').delete().eq('id', licenseId);
     await addAdminLog('super_admin_license_deleted', { license_id: licenseId });
   }
@@ -2071,6 +2222,7 @@ function SuperAdminDashboard({
                 <SuperStat icon="cancel" label="Canceladas" value={stats.cancelled} />
                 <SuperStat icon="vpn_key" label="Licenças ativas" value={stats.activeLicenses} />
                 <SuperStat icon="warning" label="Licenças vencidas" value={stats.expiredLicenses} />
+                <SuperStat icon="verified_user" label="Clientes ativos" value={stats.activeClients} />
               </div>
               <div className="grid gap-5 xl:grid-cols-2">
                 <SuperChart title="Receita e reservas mensais" rows={monthlyChart} valueKey="revenue" labelKey="monthKey" />
@@ -2079,8 +2231,15 @@ function SuperAdminDashboard({
             </div>
           ) : null}
 
-          {view === 'owners' ? <SuperTable title="Proprietários" rows={owners} columns={['full_name', 'email', 'phone', 'role']} /> : null}
-          {view === 'guests' ? <SuperTable title="Hóspedes" rows={guests} columns={['full_name', 'email', 'phone', 'role']} /> : null}
+          {view === 'users' ? (
+            <SuperUsersTable title="Usuários" rows={profiles} notice={userNotice} onRoleChange={updateUserRole} />
+          ) : null}
+          {view === 'owners' ? (
+            <SuperUsersTable title="Proprietários" rows={owners} notice={userNotice} onRoleChange={updateUserRole} />
+          ) : null}
+          {view === 'guests' ? (
+            <SuperUsersTable title="Hóspedes" rows={guests} notice={userNotice} onRoleChange={updateUserRole} />
+          ) : null}
           {view === 'reservations' ? (
             <SuperTable title="Reservas" rows={reservations} columns={['guest_name', 'guest_email', 'check_in', 'check_out', 'status']} />
           ) : null}
@@ -2163,10 +2322,14 @@ function SuperAdminDashboard({
               </form>
               <div className="grid gap-3">
                 {visibleLicenses.map((license) => {
-                  const status = normalizeLicenseStatus(license);
+                  const edit = licenseEdits[license.id] || {};
+                  const mergedLicense = { ...license, ...edit };
+                  const status = normalizeLicenseStatus(mergedLicense);
                   const owner = profiles.find((profile) => profile.id === license.owner_id);
+                  const history = licenseHistory.filter((item) => item.license_id === license.id).slice(0, 3);
                   return (
-                    <div key={license.id} className="grid gap-3 rounded-md bg-white p-4 shadow-sm xl:grid-cols-[1fr_auto] xl:items-center">
+                    <div key={license.id} className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+                      <div className="grid gap-3 xl:grid-cols-[1fr_auto] xl:items-start">
                       <div>
                         <p className="font-black">{license.license_key}</p>
                         <p className="text-sm text-ink/65">
@@ -2188,6 +2351,105 @@ function SuperAdminDashboard({
                         </Button>
                         <Button type="button" variant="outline" onClick={() => deleteLicense(license.id)}>
                           Excluir
+                        </Button>
+                      </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-5">
+                        <Field label="Plano">
+                          <TextInput
+                            value={mergedLicense.plan || ''}
+                            onChange={(event) =>
+                              setLicenseEdits((current) => ({
+                                ...current,
+                                [license.id]: { ...current[license.id], plan: event.target.value },
+                              }))
+                            }
+                          />
+                        </Field>
+                        <Field label="Status">
+                          <SelectInput
+                            value={mergedLicense.status || 'trial'}
+                            onChange={(event) =>
+                              setLicenseEdits((current) => ({
+                                ...current,
+                                [license.id]: { ...current[license.id], status: event.target.value },
+                              }))
+                            }
+                          >
+                            <option value="active">Ativa</option>
+                            <option value="expired">Vencida</option>
+                            <option value="suspended">Suspensa</option>
+                            <option value="trial">Teste</option>
+                          </SelectInput>
+                        </Field>
+                        <Field label="Vencimento">
+                          <TextInput
+                            type="date"
+                            value={mergedLicense.expires_at || ''}
+                            onChange={(event) =>
+                              setLicenseEdits((current) => ({
+                                ...current,
+                                [license.id]: { ...current[license.id], expires_at: event.target.value },
+                              }))
+                            }
+                          />
+                        </Field>
+                        <Field label="Valor mensal">
+                          <TextInput
+                            type="number"
+                            value={mergedLicense.monthly_value || 0}
+                            onChange={(event) =>
+                              setLicenseEdits((current) => ({
+                                ...current,
+                                [license.id]: { ...current[license.id], monthly_value: event.target.value },
+                              }))
+                            }
+                          />
+                        </Field>
+                        <Field label="Limite">
+                          <TextInput
+                            type="number"
+                            value={mergedLicense.property_limit || 1}
+                            onChange={(event) =>
+                              setLicenseEdits((current) => ({
+                                ...current,
+                                [license.id]: { ...current[license.id], property_limit: event.target.value },
+                              }))
+                            }
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Observações">
+                        <TextArea
+                          value={mergedLicense.notes || ''}
+                          onChange={(event) =>
+                            setLicenseEdits((current) => ({
+                              ...current,
+                              [license.id]: { ...current[license.id], notes: event.target.value },
+                            }))
+                          }
+                        />
+                      </Field>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/10 pt-3">
+                        <div className="text-xs font-semibold text-ink/55">
+                          {history.length
+                            ? history.map((item) => `${item.action} em ${format(new Date(item.created_at), 'dd/MM/yyyy HH:mm')}`).join(' | ')
+                            : 'Sem histórico registrado.'}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => {
+                            updateLicense(license, licenseEdits[license.id] || {});
+                            setLicenseEdits((current) => {
+                              const next = { ...current };
+                              delete next[license.id];
+                              return next;
+                            });
+                          }}
+                        >
+                          <MaterialIcon name="save" size={18} />
+                          Salvar alterações
                         </Button>
                       </div>
                     </div>
@@ -2276,6 +2538,54 @@ function SuperChart({ title, rows, valueKey, labelKey }) {
   );
 }
 
+function SuperUsersTable({ title, rows, notice, onRoleChange }) {
+  return (
+    <div className="grid gap-3 rounded-md bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-xl font-black">{title}</h2>
+        {notice ? <p className="text-sm font-bold text-leaf">{notice}</p> : null}
+      </div>
+      <div className="grid gap-3">
+        {rows.length ? (
+          rows.map((profile) => {
+            const role = normalizeRole(profile.role);
+            return (
+              <div key={profile.id || profile.email} className="grid gap-3 rounded-md border border-ink/10 bg-[#f8fbff] p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div>
+                  <p className="font-black">{profile.full_name || profile.email}</p>
+                  <p className="text-sm font-semibold text-ink/65">{profile.email}</p>
+                  <p className="mt-1 text-xs font-black uppercase tracking-wide text-ink/50">
+                    {roleLabels[role] || role || 'Sem role'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  {[
+                    ['super_admin', 'Super Admin'],
+                    ['proprietario', 'Proprietário'],
+                    ['hospede', 'Hóspede'],
+                  ].map(([nextRole, label]) => (
+                    <Button
+                      key={nextRole}
+                      type="button"
+                      variant={role === nextRole ? 'secondary' : 'outline'}
+                      className="px-3"
+                      onClick={() => onRoleChange(profile, nextRole)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <p className="rounded-md bg-[#f8fbff] p-4 text-sm font-semibold text-ink/60">Nenhum usuário encontrado.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SuperTable({ title, rows, columns }) {
   return (
     <div className="overflow-hidden rounded-md bg-white shadow-sm">
@@ -2299,7 +2609,7 @@ function SuperTable({ title, rows, columns }) {
                 <tr key={row.id || JSON.stringify(row)} className="border-t border-ink/10">
                   {columns.map((column) => (
                     <td key={column} className="px-4 py-3">
-                      {column === 'role' ? roleLabels[row[column]] || row[column] : String(row[column] ?? '-')}
+                      {column === 'role' ? roleLabels[normalizeRole(row[column])] || row[column] : String(row[column] ?? '-')}
                     </td>
                   ))}
                 </tr>
@@ -2374,8 +2684,8 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
     setSubmitting(true);
 
     if (!hasSupabaseConfig) {
-      if (canUsePasswordAdmin && isAdminEmail(form.email.trim()) && form.password === adminPassword) {
-        const role = form.email.trim().toLowerCase() === superAdminEmail.toLowerCase() ? 'super_admin' : 'proprietario';
+      if (canUsePasswordAdmin && isPrivilegedEmail(form.email.trim()) && form.password === adminPassword) {
+        const role = isSuperAdminEmail(form.email.trim()) ? 'super_admin' : 'proprietario';
         const profile = { id: 'local-admin', email: form.email.trim(), role, full_name: 'Administrador' };
         onAuthenticated(profile);
         setSubmitting(false);
@@ -2388,9 +2698,9 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
     }
 
     if (mode === 'signup') {
-      if (isAdminEmail(form.email.trim())) {
+      if (isPrivilegedEmail(form.email.trim())) {
         setError('Administradores não são cadastrados pela tela pública.');
-        setNotice('Crie o usuário no Supabase e promova para admin pelo painel administrativo.');
+        setNotice('Crie o usuário no Supabase e promova para proprietário pelo Super Admin.');
         setSubmitting(false);
         return;
       }
@@ -2458,12 +2768,12 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       <form className="grid w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft sm:max-w-lg sm:p-6" onSubmit={submit}>
         <div className="flex justify-end">
           <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar login" className="min-h-9 px-3 py-1.5">
-            <X size={16} />
+            <MaterialIcon name="close" size={16} />
           </Button>
         </div>
         <div className="grid justify-items-center gap-1.5 text-center">
           <div className="grid h-10 w-10 place-items-center rounded-md text-white" style={{ background: 'var(--property-accent)' }}>
-            <DoorOpen size={20} />
+            <MaterialIcon name="door_open" size={20} />
           </div>
           <h2 className="text-xl font-black">{mode === 'login' ? 'Login' : 'Cadastro'}</h2>
           <p className="max-w-xs text-xs leading-5 text-ink/55">
@@ -2532,7 +2842,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
             />
           </Field>
           <Button type="submit" disabled={submitting}>
-            {mode === 'login' ? <Lock size={18} /> : <UserPlus size={18} />}
+            <MaterialIcon name={mode === 'login' ? 'lock' : 'person_add'} size={18} />
             {submitting ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Cadastrar'}
           </Button>
           {mode === 'login' && hasSupabaseConfig ? (
@@ -2672,12 +2982,12 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   const confirmedReservations = clientReservations.filter((reservation) => reservation.status === 'confirmed');
   const cancelledReservations = clientReservations.filter((reservation) => reservation.status === 'cancelled');
   const menu = [
-    ['dashboard', 'Dashboard', BarChart3],
-    ['reservations', 'Minhas reservas', CalendarDays],
-    ['requests', 'Solicitações', ClipboardList],
-    ['settings', 'Configurações', Settings],
-    ['profile', 'Dados pessoais', User],
-    ['status', 'Status atual', ShieldCheck],
+    ['dashboard', 'Dashboard', 'dashboard'],
+    ['reservations', 'Minhas reservas', 'calendar_month'],
+    ['requests', 'Solicitações', 'fact_check'],
+    ['settings', 'Configurações', 'settings'],
+    ['profile', 'Dados pessoais', 'person'],
+    ['status', 'Status atual', 'verified_user'],
   ];
 
   async function submitProfile(event) {
@@ -2700,7 +3010,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
             </Button>
           </div>
           <nav className="mt-5 grid gap-2">
-            {menu.map(([key, label, Icon]) => (
+            {menu.map(([key, label, icon]) => (
               <button
                 key={key}
                 type="button"
@@ -2709,13 +3019,13 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                 }`}
                 onClick={() => setView(key)}
               >
-                <Icon size={18} />
+                <MaterialIcon name={icon} size={18} />
                 {label}
               </button>
             ))}
           </nav>
           <Button type="button" variant="outline" onClick={onSignOut} className="mt-5 w-full">
-            <LogOut size={18} />
+            <MaterialIcon name="logout" size={18} />
             Sair
           </Button>
         </aside>
@@ -2730,10 +3040,10 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
             <div className="grid gap-5">
               <h3 className="text-2xl font-black">Dashboard</h3>
               <div className="grid gap-4 md:grid-cols-4">
-                <PortalCard label="Solicitações" value={clientReservations.length} icon={CalendarDays} />
-                <PortalCard label="Pendentes" value={pendingReservations.length} icon={ClipboardList} />
-                <PortalCard label="Aceitas" value={confirmedReservations.length} icon={ShieldCheck} />
-                <PortalCard label="Vouchers disponíveis" value={voucherSummary.available} icon={Wallet} />
+                <PortalCard label="Solicitações" value={clientReservations.length} icon="fact_check" />
+                <PortalCard label="Pendentes" value={pendingReservations.length} icon="pending_actions" />
+                <PortalCard label="Aceitas" value={confirmedReservations.length} icon="verified_user" />
+                <PortalCard label="Vouchers disponíveis" value={voucherSummary.available} icon="redeem" />
               </div>
               <div className="rounded-md bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2763,9 +3073,9 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
-                <PortalCard label="Pendentes" value={pendingReservations.length} icon={ClipboardList} />
-                <PortalCard label="Aceitas" value={confirmedReservations.length} icon={ShieldCheck} />
-                <PortalCard label="Canceladas" value={cancelledReservations.length} icon={X} />
+                <PortalCard label="Pendentes" value={pendingReservations.length} icon="pending_actions" />
+                <PortalCard label="Aceitas" value={confirmedReservations.length} icon="verified_user" />
+                <PortalCard label="Canceladas" value={cancelledReservations.length} icon="cancel" />
               </div>
               {clientReservations.length ? (
                 clientReservations.map((reservation) => {
@@ -2917,7 +3227,7 @@ function SuggestionForm({ authProfile, onSubmit }) {
         />
       </Field>
       <Button type="submit">
-        <Mail size={18} />
+        <MaterialIcon name="mail" size={18} />
         {status === 'loading' ? 'Enviando...' : 'Enviar sugestão'}
       </Button>
       {status === 'success' ? <p className="text-sm font-semibold text-green-700">Sugestão enviada com sucesso.</p> : null}
@@ -2927,9 +3237,10 @@ function SuggestionForm({ authProfile, onSubmit }) {
 }
 
 function PortalCard({ icon: Icon, label, value }) {
+  const isMaterialIcon = typeof Icon === 'string';
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
-      <Icon className="text-leaf" size={20} />
+      {isMaterialIcon ? <MaterialIcon name={Icon} className="text-leaf" size={20} /> : <Icon className="text-leaf" size={20} />}
       <p className="mt-3 text-xs font-bold uppercase tracking-wide text-ink/50">{label}</p>
       <p className="mt-1 text-xl font-black">{value}</p>
     </div>
@@ -3001,10 +3312,11 @@ function ManualReservationEditor({ reservation, onSave }) {
 }
 
 function InfoStat({ icon: Icon, label, value }) {
+  const isMaterialIcon = typeof Icon === 'string';
   return (
     <div className="flex items-center gap-3">
       <span className="grid h-11 w-11 place-items-center rounded-md bg-mist text-leaf dark:bg-white/10 dark:text-blue-300">
-        <Icon size={20} />
+        {isMaterialIcon ? <MaterialIcon name={Icon} size={20} /> : <Icon size={20} />}
       </span>
       <div>
         <p className="text-xs font-bold uppercase tracking-wide text-ink/50 dark:text-white/55">{label}</p>
@@ -3024,11 +3336,12 @@ function SummaryRow({ label, value, strong = false }) {
 }
 
 function FinanceCard({ icon: Icon, label, value }) {
+  const isMaterialIcon = typeof Icon === 'string';
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
       <div className="flex items-center gap-3">
         <span className="grid h-10 w-10 place-items-center rounded-md bg-mist text-leaf">
-          <Icon size={18} />
+          {isMaterialIcon ? <MaterialIcon name={Icon} size={18} /> : <Icon size={18} />}
         </span>
         <span className="text-sm font-semibold text-ink/65">{label}</span>
       </div>
@@ -3135,6 +3448,7 @@ function AdminPanel({
   onSignOut,
   addAdminLog,
   createManualReservation,
+  createPaymentLink,
   reorderPhoto,
   onClose,
   onSelectProperty,
@@ -3170,10 +3484,10 @@ function AdminPanel({
       email: authProfile?.email || adminEmail,
       phone: authProfile?.phone || '',
       whatsapp: fallbackOwnerWhatsapp,
-      role: authProfile?.role || 'admin',
+      role: normalizeRole(authProfile?.role) || 'proprietario',
     }),
   );
-  const isOwnerAdmin = isAdminEmail(authProfile?.email || adminSession?.user?.email || adminDetails.email);
+  const isOwnerAdmin = normalizeRole(authProfile?.role) === 'super_admin';
   const [manualReservation, setManualReservation] = useState({
     guest_name: '',
     guest_email: '',
@@ -3247,16 +3561,16 @@ function AdminPanel({
     return rows.map((row) => ({ ...row, percentage: Math.max(8, Math.round((row.amount / max) * 100)) }));
   }, [cashMovements]);
   const adminMenu = [
-    ['dashboard', 'Dashboard', BarChart3],
-    ['houses', 'Casas', Home],
-    ...(isOwnerAdmin ? [['licenses', 'Licenças', Lock]] : []),
-    ['reservations', 'Reservas', CalendarDays],
-    ['confirmations', 'Confirmações', ClipboardList],
-    ['cash', 'Caixa', Wallet],
-    ['reports', 'Relatórios', FileText],
-    ['clients', 'Clientes', Users],
-    ['admin', 'Dados do administrador', User],
-    ['settings', 'Configurações', Settings],
+    ['dashboard', 'Dashboard', 'dashboard'],
+    ['houses', 'Casas', 'home_work'],
+    ...(isOwnerAdmin ? [['licenses', 'Licenças', 'vpn_key']] : []),
+    ['reservations', 'Reservas', 'calendar_month'],
+    ['confirmations', 'Confirmações', 'fact_check'],
+    ['cash', 'Caixa', 'account_balance_wallet'],
+    ['reports', 'Relatórios', 'description'],
+    ['clients', 'Clientes', 'groups'],
+    ['admin', 'Dados do administrador', 'person'],
+    ['settings', 'Configurações', 'settings'],
   ];
   const reportLabels = {
     summary: 'Resumo gerencial',
@@ -3330,7 +3644,7 @@ function AdminPanel({
       return;
     }
     setAdminUsers((current) => current.map((item) => (item.id === profile.id ? { ...item, role } : item)));
-    setAdminUserNotice(`${profile.email} atualizado para ${role === 'admin' ? 'administrador' : 'cliente'}.`);
+    setAdminUserNotice(`${profile.email} atualizado para ${roleLabels[normalizeRole(role)] || role}.`);
   }
 
   async function submitSupabaseAdmin(event) {
@@ -3359,7 +3673,7 @@ function AdminPanel({
       setAdminUserNotice('Esse e-mail precisa criar conta ou entrar pelo Google/Facebook/Apple antes de virar admin.');
       return;
     }
-    await updateProfileRole(data, 'admin');
+    await updateProfileRole(data, 'proprietario');
     setNewAdminEmail('');
     loadAdminUsers();
   }
@@ -3425,7 +3739,7 @@ function AdminPanel({
       ...adminDetails,
       full_name: adminDetails.full_name || 'Administrador',
       email: adminDetails.email || adminEmail,
-      role: adminDetails.role || 'admin',
+      role: normalizeRole(adminDetails.role || authProfile?.role) || 'proprietario',
     };
     setAdminDetails(normalizedDetails);
     writeLocalData('adminDetails', normalizedDetails);
@@ -3436,7 +3750,7 @@ function AdminPanel({
         email: normalizedDetails.email,
         full_name: normalizedDetails.full_name,
         phone: normalizedDetails.phone,
-        role: 'admin',
+        role: normalizedDetails.role,
       });
     }
 
@@ -3462,11 +3776,18 @@ function AdminPanel({
     setShowNewProperty(false);
   }
 
-  function confirmReservation(reservation) {
-    updateReservationStatus(reservation.id, 'confirmed');
+  async function confirmReservation(reservation) {
+    let preparedReservation = { ...reservation, status: 'confirmed' };
+    if (['pix', 'card'].includes(reservation.payment_method) && !reservation.payment_url) {
+      preparedReservation = await createPaymentLink(preparedReservation);
+      if (preparedReservation.payment_url) {
+        await updateReservationDetails(reservation.id, { payment_url: preparedReservation.payment_url });
+      }
+    }
+    await updateReservationStatus(reservation.id, 'confirmed');
     const whatsAppUrl = buildWhatsAppUrl(
       reservation.guest_phone,
-      buildGuestConfirmationMessage(property, reservation, propertyPaymentSettings),
+      buildGuestConfirmationMessage(property, preparedReservation, propertyPaymentSettings),
     );
     if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
   }
@@ -3846,7 +4167,7 @@ function AdminPanel({
 
   const ownerPanelBlocked =
     adminUnlocked &&
-    authProfile?.role !== 'super_admin' &&
+    normalizeRole(authProfile?.role) !== 'super_admin' &&
     propertyLicense &&
     ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense));
 
@@ -3909,7 +4230,7 @@ function AdminPanel({
 
               if (
                 canUsePasswordAdmin &&
-                [adminEmail.toLowerCase(), superAdminEmail.toLowerCase()].includes(login.email.trim().toLowerCase()) &&
+                isPrivilegedEmail(login.email.trim()) &&
                 login.password === adminPassword
               ) {
                 onUnlock();
@@ -3927,7 +4248,7 @@ function AdminPanel({
                   return;
                 }
                 if (error) setLoginError('Login nao autorizado. Confira e-mail e senha.');
-                if (data?.user && !['proprietario', 'admin', 'super_admin'].includes(getAuthRole(null, data.user.email))) {
+                if (data?.user && !['proprietario', 'super_admin'].includes(getAuthRole(null, data.user.email))) {
                   await supabase.auth.signOut();
                   setLoginError('Este e-mail não tem permissão de proprietário.');
                 }
@@ -4009,7 +4330,7 @@ function AdminPanel({
                 <p className="mt-1 truncate text-xs font-semibold text-ink/55">{adminDetails.email || authProfile?.email || adminEmail}</p>
               </div>
               <nav className="grid gap-1">
-                {adminMenu.map(([key, label, Icon]) => (
+                {adminMenu.map(([key, label, icon]) => (
                   <button
                     key={key}
                     type="button"
@@ -4018,7 +4339,7 @@ function AdminPanel({
                     }`}
                     onClick={() => setAdminView(key)}
                   >
-                    <Icon size={17} />
+                    <MaterialIcon name={icon} size={18} />
                     {label}
                   </button>
                 ))}
@@ -4033,7 +4354,7 @@ function AdminPanel({
                 </Button>
               </div>
             ) : null}
-            {authProfile?.role !== 'super_admin' && propertyLicense && ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense)) ? (
+            {normalizeRole(authProfile?.role) !== 'super_admin' && propertyLicense && ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense)) ? (
               <section className="grid gap-3 rounded-md border border-red-200 bg-red-50 p-5 text-red-800 shadow-sm">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="mt-1 shrink-0" />
@@ -4054,10 +4375,10 @@ function AdminPanel({
                   <p className="mt-1 text-sm text-ink/65">Visão geral operacional da casa selecionada.</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-4">
-                  <FinanceCard icon={Home} label="Casas" value={properties.length} />
-                  <FinanceCard icon={CalendarDays} label="Reservas ativas" value={visibleReservations.length} />
-                  <FinanceCard icon={ClipboardList} label="Pendentes" value={pendingReservations.length} />
-                  <FinanceCard icon={Wallet} label="Recebido" value={currency.format(financialSummary.received)} />
+                  <FinanceCard icon="home_work" label="Casas" value={properties.length} />
+                  <FinanceCard icon="event_available" label="Reservas ativas" value={visibleReservations.length} />
+                  <FinanceCard icon="pending_actions" label="Pendentes" value={pendingReservations.length} />
+                  <FinanceCard icon="account_balance_wallet" label="Recebido" value={currency.format(financialSummary.received)} />
                 </div>
               </section>
             ) : null}
@@ -4837,7 +5158,7 @@ function AdminPanel({
                     </Field>
                   </div>
                   <div className="rounded-md bg-[#f4f8ff] p-3 text-sm leading-6 text-ink/70">
-                    <strong>Perfil:</strong> {adminDetails.role || authProfile?.role || 'admin'}. O e-mail de acesso continua
+                    <strong>Perfil:</strong> {roleLabels[normalizeRole(adminDetails.role || authProfile?.role)] || 'Proprietário'}. O e-mail de acesso continua
                     dependendo dos administradores autorizados na configuração do site.
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -4854,7 +5175,7 @@ function AdminPanel({
                   <div>
                     <h3 className="text-xl font-black">Administradores Supabase</h3>
                     <p className="mt-1 text-sm text-ink/65">
-                      Primeiro o usuário precisa existir no Supabase Auth; depois promova o perfil dele para admin.
+                      Primeiro o usuário precisa existir no Supabase Auth; depois promova o perfil dele para proprietário.
                     </p>
                   </div>
                   <form className="grid gap-3 sm:grid-cols-[1fr_auto]" onSubmit={submitSupabaseAdmin}>
@@ -4869,7 +5190,7 @@ function AdminPanel({
                     <div className="flex items-end">
                       <Button type="submit" className="w-full">
                         <UserPlus size={18} />
-                        Tornar admin
+                        Tornar proprietário
                       </Button>
                     </div>
                   </form>
@@ -4885,23 +5206,23 @@ function AdminPanel({
                             <p className="font-black">{profile.full_name || profile.email}</p>
                             <p className="text-sm text-ink/65">{profile.email}</p>
                             <p className="mt-1 text-xs font-bold uppercase tracking-wide text-ink/50">
-                              {profile.role || 'client'}
+                              {roleLabels[normalizeRole(profile.role)] || profile.role || 'hospede'}
                             </p>
                           </div>
                           <div className="flex flex-wrap gap-2 sm:justify-end">
                             <Button
                               type="button"
-                              variant={profile.role === 'admin' ? 'secondary' : 'outline'}
-                              onClick={() => updateProfileRole(profile, 'admin')}
+                              variant={normalizeRole(profile.role) === 'proprietario' ? 'secondary' : 'outline'}
+                              onClick={() => updateProfileRole(profile, 'proprietario')}
                             >
-                              Admin
+                              Proprietário
                             </Button>
                             <Button
                               type="button"
-                              variant={profile.role === 'client' ? 'secondary' : 'outline'}
-                              onClick={() => updateProfileRole(profile, 'client')}
+                              variant={normalizeRole(profile.role) === 'hospede' ? 'secondary' : 'outline'}
+                              onClick={() => updateProfileRole(profile, 'hospede')}
                             >
-                              Cliente
+                              Hóspede
                             </Button>
                           </div>
                         </div>

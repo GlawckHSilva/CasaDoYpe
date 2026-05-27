@@ -17,9 +17,53 @@ Deno.serve(async (req) => {
       return json({ error: 'Payment provider is not configured.' }, 500);
     }
 
-    const { reservationId, propertyName, payerEmail, amount } = await req.json();
-    if (!reservationId || !amount || Number(amount) <= 0) {
+    const { reservationId } = await req.json();
+    if (!reservationId) {
       return json({ error: 'Invalid reservation payment request.' }, 400);
+    }
+
+    const authHeader = req.headers.get('Authorization') || '';
+    const userJwt = authHeader.replace(/^Bearer\s+/i, '');
+    if (!userJwt) {
+      return json({ error: 'Authentication required.' }, 401);
+    }
+
+    const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${userJwt}`,
+      },
+    });
+    if (!userResponse.ok) {
+      return json({ error: 'Invalid user session.' }, 401);
+    }
+    const user = await userResponse.json();
+    const profile = await restSingle(
+      supabaseUrl,
+      serviceRoleKey,
+      `profiles?id=eq.${encodeURIComponent(user.id)}&select=id,email,role`,
+    );
+    const reservation = await restSingle(
+      supabaseUrl,
+      serviceRoleKey,
+      `reservations?id=eq.${encodeURIComponent(reservationId)}&select=id,property_id,guest_email,total_amount,installments`,
+    );
+    if (!reservation) {
+      return json({ error: 'Reservation not found.' }, 404);
+    }
+    const property = await restSingle(
+      supabaseUrl,
+      serviceRoleKey,
+      `properties?id=eq.${encodeURIComponent(reservation.property_id)}&select=id,name,owner_id`,
+    );
+    const canManageReservation = profile?.role === 'super_admin' || property?.owner_id === user.id;
+    if (!canManageReservation) {
+      return json({ error: 'Not allowed to create payment for this reservation.' }, 403);
+    }
+
+    const amount = Number(reservation.total_amount || 0);
+    if (amount <= 0) {
+      return json({ error: 'Invalid reservation amount.' }, 400);
     }
 
     const preferenceResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
@@ -31,17 +75,17 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         items: [
           {
-            title: `Reserva ${propertyName || 'Casa'}`,
+            title: `Reserva ${property?.name || 'Casa'}`,
             quantity: 1,
             currency_id: 'BRL',
-            unit_price: Number(amount),
+            unit_price: amount,
           },
         ],
-        payer: payerEmail ? { email: payerEmail } : undefined,
+        payer: reservation.guest_email ? { email: reservation.guest_email } : undefined,
         external_reference: reservationId,
         payment_methods: {
           excluded_payment_types: [{ id: 'ticket' }],
-          installments: 6,
+          installments: Number(reservation.installments || 1),
         },
         back_urls: {
           success: `${req.headers.get('origin') || ''}/#reserva`,
@@ -75,6 +119,19 @@ Deno.serve(async (req) => {
     return json({ error: 'Unexpected payment error.' }, 500);
   }
 });
+
+async function restSingle(supabaseUrl: string, serviceRoleKey: string, path: string) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!response.ok) return null;
+  const rows = await response.json();
+  return Array.isArray(rows) ? rows[0] || null : rows;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

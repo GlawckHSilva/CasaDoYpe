@@ -33,6 +33,7 @@ VITE_SUPABASE_ANON_KEY=sua-chave-anon-publica
 VITE_OWNER_WHATSAPP=43998108328
 VITE_OWNER_EMAIL=proprietario@email.com
 VITE_ADMIN_EMAIL=glawcksilva8@gmail.com
+VITE_ADMIN_EMAIL_ALIASES=
 VITE_SUPER_ADMIN_EMAIL=glawcksilva55@gmail.com
 VITE_COMMERCIAL_EMAIL=hospedex1@gmail.com
 VITE_ADMIN_PASSWORD=sua-senha-do-painel-admin
@@ -57,6 +58,32 @@ supabase functions deploy send-suggestion-email
 - `/super-admin`: área privada do Super Admin. Não aparece em menus públicos e exige `profiles.role = 'super_admin'`.
 - `/admin`: painel do proprietário. Exige `profiles.role = 'proprietario'`.
 - `/hospede`: portal do hóspede. Exige `profiles.role = 'hospede'`.
+
+## Super Admin e licenças
+
+A rota `/super-admin` é privada, não aparece em menus públicos e exige `profiles.role = 'super_admin'`.
+O e-mail `glawcksilva55@gmail.com` é reconhecido automaticamente como Super Admin pelo frontend e pelo SQL.
+
+Roles oficiais:
+
+- `super_admin`: controla usuários, proprietários, licenças, reservas, financeiro e histórico.
+- `proprietario`: administra apenas os próprios imóveis, reservas, caixa e configurações financeiras.
+- `hospede`: acessa o portal do cliente, dados pessoais e reservas.
+
+Licenças ficam em `licenses` e o histórico em `license_history`.
+Ao criar, renovar, suspender ou excluir uma licença, o banco sincroniza os campos públicos da casa (`license_key`, `license_expires_at`, `license_active`) para bloquear reservas e painel quando a licença estiver vencida ou suspensa.
+
+Para atualizar um Supabase que já existe, rode no SQL Editor:
+
+```sql
+supabase/migrations/202605270830_super_admin_roles_licenses.sql
+```
+
+Depois confirme:
+
+1. `glawcksilva55@gmail.com` com `profiles.role = 'super_admin'`.
+2. Proprietários com `profiles.role = 'proprietario'`.
+3. Hóspedes com `profiles.role = 'hospede'`.
 
 ## Fotos
 
