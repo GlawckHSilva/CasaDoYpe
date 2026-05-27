@@ -74,6 +74,8 @@ const canUsePasswordAdmin = Boolean(adminPassword);
 const fallbackOwnerWhatsapp = import.meta.env.VITE_OWNER_WHATSAPP || '43998108328';
 const fallbackOwnerEmail = import.meta.env.VITE_OWNER_EMAIL || adminEmail;
 const existingAccountMessage = 'Esse cadastro já existe. Use Login ou Recuperar senha para acessar.';
+const authRequestTimeoutMs = 8000;
+const profileRequestTimeoutMs = 3500;
 const paymentLabels = {
   pix: 'Pix',
   card: 'Cartão',
@@ -740,7 +742,7 @@ export default function App() {
         { data: reservationRows },
         { data: movementRows },
         { data: interestRows },
-        { data: profileRows },
+        profileResult,
         { data: licenseRows },
         { data: licenseHistoryRows },
         { data: paymentSettingRows },
@@ -767,7 +769,7 @@ export default function App() {
       if (interestRows?.length) {
         setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
       }
-      if (profileRows?.length) setProfiles(profileRows);
+      if (!profileResult.error && Array.isArray(profileResult.data)) setProfiles(profileResult.data);
       if (licenseRows?.length) setLicenses(licenseRows);
       if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
       if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
@@ -800,14 +802,14 @@ export default function App() {
           .select('*')
           .eq('id', session.user.id)
           .maybeSingle(),
-        8000,
+        profileRequestTimeoutMs,
         'Consulta do perfil excedeu o tempo limite.',
       );
 
       if (data) {
         profile = { ...profile, ...data, role: getAuthRole(data, session.user.email) };
       } else {
-        await safeSupabaseQuery(
+        void safeSupabaseQuery(
           supabase.from('profiles').upsert({
             id: session.user.id,
             email: session.user.email,
@@ -815,7 +817,7 @@ export default function App() {
             full_name: profile.full_name,
             phone: profile.phone,
           }),
-          8000,
+          profileRequestTimeoutMs,
           'Criacao do perfil excedeu o tempo limite.',
         );
       }
@@ -974,6 +976,11 @@ export default function App() {
       setClientPortalOpen(true);
     }
   }, [route, authProfile]);
+
+  useEffect(() => {
+    if (route !== '/super-admin' || normalizeRole(authProfile?.role) !== 'super_admin') return;
+    loadSupabaseData();
+  }, [route, authProfile?.id, authProfile?.role]);
 
   useEffect(() => {
     if (normalizeRole(authProfile?.role) !== 'hospede') return;
@@ -1441,7 +1448,9 @@ export default function App() {
           onAuthenticated={(profile) => {
             setAuthProfile(profile);
             setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
-            navigateTo(roleHomePath(profile.role));
+            setAdminOpen(false);
+            setClientPortalOpen(false);
+            navigateTo('/');
           }}
           resolveAuthProfile={resolveAuthProfile}
         />
@@ -1499,6 +1508,7 @@ export default function App() {
         authProfile={authProfile}
         onSignOut={signOut}
         onHome={() => navigateTo('/')}
+        onRefresh={loadSupabaseData}
         addAdminLog={addAdminLog}
       />
     );
@@ -2023,9 +2033,9 @@ export default function App() {
             setAuthProfile(profile);
             setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
             setAuthOpen(false);
-            navigateTo(roleHomePath(profile.role));
-            if (normalizeRole(profile.role) === 'proprietario') setAdminOpen(true);
-            if (normalizeRole(profile.role) === 'hospede') setClientPortalOpen(true);
+            setAdminOpen(false);
+            setClientPortalOpen(false);
+            navigateTo('/');
           }}
           resolveAuthProfile={resolveAuthProfile}
         />
@@ -2087,12 +2097,14 @@ function SuperAdminDashboard({
   authProfile,
   onSignOut,
   onHome,
+  onRefresh,
   addAdminLog,
 }) {
   const [view, setView] = useState('dashboard');
   const [query, setQuery] = useState('');
   const [licenseEdits, setLicenseEdits] = useState({});
   const [userNotice, setUserNotice] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [licenseDraft, setLicenseDraft] = useState({
     owner_id: '',
     property_id: '',
@@ -2172,15 +2184,37 @@ function SuperAdminDashboard({
 
     setProfiles((current) => current.map((item) => (item.id === profile.id ? { ...item, role: normalizedRole } : item)));
     if (hasSupabaseConfig) {
-      const { error } = await supabase.from('profiles').update({ role: normalizedRole }).eq('id', profile.id);
+      const { data: savedProfile, error } = await safeSupabaseQuery(
+        supabase.rpc('set_profile_role', {
+          target_profile_id: profile.id,
+          target_role: normalizedRole,
+        }),
+        authRequestTimeoutMs,
+        'Alteracao de permissao excedeu o tempo limite.',
+      );
       if (error) {
         setProfiles((current) => current.map((item) => (item.id === profile.id ? profile : item)));
-        setUserNotice('Não foi possível alterar a permissão. Confira as policies do Supabase.');
+        setUserNotice(`Não foi possível alterar a permissão: ${error.message || 'confira o Supabase.'}`);
         return;
+      }
+      if (savedProfile) {
+        setProfiles((current) => current.map((item) => (item.id === profile.id ? savedProfile : item)));
       }
     }
     setUserNotice(`${profile.email} atualizado para ${roleLabels[normalizedRole] || normalizedRole}.`);
     await addAdminLog('super_admin_role_updated', { user_id: profile.id, email: profile.email, role: normalizedRole });
+    await onRefresh?.();
+  }
+
+  async function refreshDashboardData() {
+    setRefreshing(true);
+    setUserNotice('');
+    try {
+      await onRefresh?.();
+      setUserNotice('Dados atualizados.');
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function upsertLicense(payload) {
@@ -2277,7 +2311,13 @@ function SuperAdminDashboard({
               <p className="text-xs font-bold uppercase tracking-wide text-ink/50">HospedeX</p>
               <h1 className="text-2xl font-black">Gestão total do sistema</h1>
             </div>
-            <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar licenças, proprietários..." />
+            <div className="grid gap-2 sm:grid-cols-[auto_minmax(220px,320px)]">
+              <Button type="button" variant="outline" onClick={refreshDashboardData} disabled={refreshing} className="min-h-11 px-4">
+                <MaterialIcon name="refresh" size={18} />
+                {refreshing ? 'Atualizando' : 'Atualizar'}
+              </Button>
+              <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar licenças, proprietários..." />
+            </div>
           </header>
 
           {view === 'dashboard' ? (
@@ -2742,7 +2782,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       supabase.auth.resetPasswordForEmail(form.email.trim(), {
         redirectTo: getPasswordRecoveryRedirect(),
       }),
-      15000,
+      authRequestTimeoutMs,
       'Recuperacao de senha excedeu o tempo limite.',
     );
     if (resetError) {
@@ -2793,7 +2833,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
             emailRedirectTo: window.location.origin,
           },
         }),
-        15000,
+        10000,
         'Cadastro excedeu o tempo limite. Confira sua conexao e tente novamente.',
       );
       if (signUpError) {
@@ -2826,7 +2866,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
             phone: form.phone,
             role: getAuthRole(null, form.email.trim()),
           }),
-          8000,
+          profileRequestTimeoutMs,
           'Cadastro criado, mas o perfil demorou para salvar.',
         );
       }
@@ -2847,7 +2887,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
         email: form.email.trim(),
         password: form.password,
       }),
-      15000,
+      authRequestTimeoutMs,
       'Login excedeu o tempo limite. Confira sua conexao e tente novamente.',
     );
     if (/tempo limite/i.test(signInError?.message || '')) {
@@ -3035,7 +3075,7 @@ function PasswordRecoveryModal({ onClose }) {
     try {
       const { data: sessionData, error: sessionError } = await safeSupabaseQuery(
         supabase.auth.getSession(),
-        8000,
+        profileRequestTimeoutMs,
         'Validacao do link excedeu o tempo limite.',
       );
       if (sessionError || !sessionData?.session) {
@@ -3044,7 +3084,7 @@ function PasswordRecoveryModal({ onClose }) {
       }
       const { error: updateError } = await safeSupabaseQuery(
         supabase.auth.updateUser({ password }),
-        15000,
+        authRequestTimeoutMs,
         'Alteracao de senha excedeu o tempo limite.',
       );
       if (updateError) {
@@ -3777,12 +3817,19 @@ function AdminPanel({
       return;
     }
     if (!hasSupabaseConfig || !profile?.id) return;
-    const { error } = await supabase.from('profiles').update({ role }).eq('id', profile.id);
+    const { data: savedProfile, error } = await safeSupabaseQuery(
+      supabase.rpc('set_profile_role', {
+        target_profile_id: profile.id,
+        target_role: normalizeRole(role),
+      }),
+      authRequestTimeoutMs,
+      'Alteracao de permissao excedeu o tempo limite.',
+    );
     if (error) {
-      setAdminUserNotice('Não foi possível atualizar esse usuário. Confira as políticas RLS da tabela profiles.');
+      setAdminUserNotice(`Não foi possível atualizar esse usuário: ${error.message || 'confira o Supabase.'}`);
       return;
     }
-    setAdminUsers((current) => current.map((item) => (item.id === profile.id ? { ...item, role } : item)));
+    setAdminUsers((current) => current.map((item) => (item.id === profile.id ? savedProfile || { ...item, role } : item)));
     setAdminUserNotice(`${profile.email} atualizado para ${roleLabels[normalizeRole(role)] || role}.`);
   }
 
