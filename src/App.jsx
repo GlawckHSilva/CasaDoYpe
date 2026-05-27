@@ -229,10 +229,10 @@ function writeLocalData(key, value) {
   window.localStorage.setItem(`casa-do-ype:${key}`, JSON.stringify(value));
 }
 
-async function safeSupabaseQuery(query, timeoutMs = 12000) {
+async function safeSupabaseQuery(query, timeoutMs = 12000, timeoutMessage = 'Consulta inicial excedeu o tempo limite.') {
   let timerId;
   const timeout = new Promise((resolve) => {
-    timerId = setTimeout(() => resolve({ data: null, error: new Error('Consulta inicial excedeu o tempo limite.') }), timeoutMs);
+    timerId = setTimeout(() => resolve({ data: null, error: new Error(timeoutMessage) }), timeoutMs);
   });
 
   try {
@@ -768,22 +768,30 @@ export default function App() {
     };
 
     if (hasSupabaseConfig) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle();
+      const { data } = await safeSupabaseQuery(
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .maybeSingle(),
+        8000,
+        'Consulta do perfil excedeu o tempo limite.',
+      );
 
       if (data) {
         profile = { ...profile, ...data, role: getAuthRole(data, session.user.email) };
       } else {
-        await supabase.from('profiles').upsert({
-          id: session.user.id,
-          email: session.user.email,
-          role: profile.role,
-          full_name: profile.full_name,
-          phone: profile.phone,
-        });
+        await safeSupabaseQuery(
+          supabase.from('profiles').upsert({
+            id: session.user.id,
+            email: session.user.email,
+            role: profile.role,
+            full_name: profile.full_name,
+            phone: profile.phone,
+          }),
+          8000,
+          'Criacao do perfil excedeu o tempo limite.',
+        );
       }
     }
 
@@ -2679,9 +2687,13 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       setError('Informe o e-mail para receber o link de recuperação.');
       return;
     }
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(form.email.trim(), {
-      redirectTo: window.location.origin,
-    });
+    const { error: resetError } = await safeSupabaseQuery(
+      supabase.auth.resetPasswordForEmail(form.email.trim(), {
+        redirectTo: window.location.origin,
+      }),
+      15000,
+      'Recuperacao de senha excedeu o tempo limite.',
+    );
     if (resetError) {
       setError('Não foi possível enviar a recuperação de senha agora.');
       return;
@@ -2695,6 +2707,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
     setNotice('');
     setSubmitting(true);
 
+    try {
     if (!hasSupabaseConfig) {
       if (canUsePasswordAdmin && isPrivilegedEmail(form.email.trim()) && form.password === adminPassword) {
         const role = isSuperAdminEmail(form.email.trim()) ? 'super_admin' : 'proprietario';
@@ -2716,15 +2729,23 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
         setSubmitting(false);
         return;
       }
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: form.email.trim(),
-        password: form.password,
-        options: {
-          data: { full_name: form.full_name, phone: form.phone },
-          emailRedirectTo: window.location.origin,
-        },
-      });
+      const { data, error: signUpError } = await safeSupabaseQuery(
+        supabase.auth.signUp({
+          email: form.email.trim(),
+          password: form.password,
+          options: {
+            data: { full_name: form.full_name, phone: form.phone },
+            emailRedirectTo: window.location.origin,
+          },
+        }),
+        15000,
+        'Cadastro excedeu o tempo limite. Confira sua conexao e tente novamente.',
+      );
       if (signUpError) {
+        if (/tempo limite/i.test(signUpError.message || '')) {
+          setError('O cadastro demorou demais. Confira sua conexao e tente novamente.');
+          return;
+        }
         const alreadyRegistered = /already|registered|exists/i.test(signUpError.message || '');
         setError(
           alreadyRegistered
@@ -2734,16 +2755,25 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
         setSubmitting(false);
         return;
       }
-      if (data.user) {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          email: form.email.trim(),
-          full_name: form.full_name,
-          phone: form.phone,
-          role: getAuthRole(null, form.email.trim()),
-        });
+      if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        setError('Este e-mail ja tem cadastro. Use Login ou Recuperar senha.');
+        setMode('login');
+        return;
       }
-      if (data.session) {
+      if (data?.session && data.user) {
+        await safeSupabaseQuery(
+          supabase.from('profiles').upsert({
+            id: data.user.id,
+            email: form.email.trim(),
+            full_name: form.full_name,
+            phone: form.phone,
+            role: getAuthRole(null, form.email.trim()),
+          }),
+          8000,
+          'Cadastro criado, mas o perfil demorou para salvar.',
+        );
+      }
+      if (data?.session) {
         const profile = await resolveAuthProfile(data.session);
         onAuthenticated(profile);
         setSubmitting(false);
@@ -2755,17 +2785,25 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       return;
     }
 
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email: form.email.trim(),
-      password: form.password,
-    });
+    const { data, error: signInError } = await safeSupabaseQuery(
+      supabase.auth.signInWithPassword({
+        email: form.email.trim(),
+        password: form.password,
+      }),
+      15000,
+      'Login excedeu o tempo limite. Confira sua conexao e tente novamente.',
+    );
+    if (/tempo limite/i.test(signInError?.message || '')) {
+      setError('O login demorou demais. Confira sua conexao e tente novamente.');
+      return;
+    }
     if (signInError?.message === 'Email not confirmed') {
       setError('E-mail ainda não confirmado no Supabase.');
       setNotice('Verifique a caixa de entrada ou desative a confirmação de e-mail no Supabase Auth durante testes.');
       setSubmitting(false);
       return;
     }
-    if (signInError || !data.session) {
+    if (signInError || !data?.session) {
       setError('Login não autorizado. Confira e-mail e senha.');
       setSubmitting(false);
       return;
@@ -2773,6 +2811,11 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
     const profile = await resolveAuthProfile(data.session);
     onAuthenticated(profile);
     setSubmitting(false);
+    } catch {
+      setError('Nao foi possivel concluir agora. Confira sua conexao e tente novamente.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
