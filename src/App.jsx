@@ -575,7 +575,6 @@ export default function App() {
   const [themeMode, setThemeMode] = useState(() => readLocalData('themeMode', 'light'));
   const [message, setMessage] = useState('');
   const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('');
-  const [loading, setLoading] = useState(true);
   const [propertyTransitionKey, setPropertyTransitionKey] = useState(0);
   const [booking, setBooking] = useState({
     check_in: '',
@@ -705,7 +704,6 @@ export default function App() {
 
   async function loadSupabaseData() {
     if (!hasSupabaseConfig) {
-      setLoading(false);
       return;
     }
 
@@ -747,8 +745,8 @@ export default function App() {
       if (licenseRows?.length) setLicenses(licenseRows);
       if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
       if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
-    } finally {
-      setLoading(false);
+    } catch {
+      // Keep the public page visible even when optional admin data cannot be loaded.
     }
   }
 
@@ -1992,11 +1990,6 @@ export default function App() {
         />
       ) : null}
 
-      {loading ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#f4f8ff]/90 font-bold">
-          Carregando informacoes...
-        </div>
-      ) : null}
     </div>
   );
 }
