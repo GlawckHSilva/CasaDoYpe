@@ -15,6 +15,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 88px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -24,6 +29,13 @@ body {
   min-width: 320px;
   min-height: 100vh;
   font-family: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+}
+
+#fotos,
+#calendario,
+#reserva,
+#sugestoes {
+  scroll-margin-top: 88px;
 }
 
 button,

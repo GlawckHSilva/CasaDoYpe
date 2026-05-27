@@ -24,7 +24,8 @@ npm run dev
 6. Em Authentication > URL Configuration, configure:
    - Site URL: `http://127.0.0.1:5173` em desenvolvimento, ou a URL publicada do site.
    - Redirect URLs: `http://127.0.0.1:5173/**` e a URL publicada do site com `/**`.
-7. Copie `.env.example` para `.env` e preencha:
+7. Para login com Google, Facebook e Apple, veja `SUPABASE_SOCIAL_AUTH.md`.
+8. Copie `.env.example` para `.env` e preencha:
 
 ```bash
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co

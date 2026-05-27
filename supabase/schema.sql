@@ -413,6 +413,92 @@ as $$
   select public.is_super_admin() or public.is_owner();
 $$;
 
+create or replace function public.is_owner_admin_email(target_email text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select lower(coalesce(target_email, '')) in (
+    lower('glawcksilva8@gmail.com'),
+    lower('glawcksiva8@gmail.com')
+  );
+$$;
+
+create or replace function public.is_owner_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.is_super_admin() or public.is_owner_admin_email(auth.email());
+$$;
+
+create or replace function public.protect_property_license_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_owner_admin() then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.license_key := '';
+    new.license_expires_at := null;
+    new.license_active := false;
+    return new;
+  end if;
+
+  if (
+    coalesce(new.license_key, '') is distinct from coalesce(old.license_key, '')
+    or coalesce(new.license_expires_at::text, '') is distinct from coalesce(old.license_expires_at::text, '')
+    or coalesce(new.license_active, true) is distinct from coalesce(old.license_active, true)
+  ) then
+    raise exception 'Somente o administrador principal pode alterar licencas de uso.';
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.protect_profile_role_changes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_owner_admin() then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' and new.role is distinct from old.role then
+    raise exception 'Somente o administrador principal pode alterar permissoes.';
+  end if;
+
+  if tg_op = 'INSERT' and new.role = 'admin' and not public.is_owner_admin_email(new.email) then
+    new.role := 'client';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_property_license_fields on public.properties;
+create trigger protect_property_license_fields
+  before insert or update on public.properties
+  for each row execute function public.protect_property_license_fields();
+
+drop trigger if exists protect_profile_role_changes on public.profiles;
+create trigger protect_profile_role_changes
+  before insert or update on public.profiles
+  for each row execute function public.protect_profile_role_changes();
+
 drop policy if exists "Public can read properties" on public.properties;
 drop policy if exists "Users can read own profile" on public.profiles;
 drop policy if exists "Users can insert own profile" on public.profiles;
