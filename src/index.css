@@ -60,17 +60,22 @@ textarea {
 }
 
 .btn-primary-theme {
-  background: linear-gradient(135deg, var(--property-accent-light), var(--property-accent), var(--property-accent-dark));
+  background: linear-gradient(
+    135deg,
+    var(--property-accent-light, #60a5fa),
+    var(--property-accent, #2563eb),
+    var(--property-accent-dark, #142033)
+  );
   color: #fff;
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--property-accent) 32%, transparent);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--property-accent, #2563eb) 32%, transparent);
 }
 
 .btn-primary-theme:hover {
-  box-shadow: 0 18px 34px color-mix(in srgb, var(--property-accent) 42%, transparent);
+  box-shadow: 0 18px 34px color-mix(in srgb, var(--property-accent, #2563eb) 42%, transparent);
 }
 
 .btn-secondary-theme {
-  background: linear-gradient(135deg, #142033, var(--property-accent-dark), var(--property-accent));
+  background: linear-gradient(135deg, #142033, var(--property-accent-dark, #1d4ed8), var(--property-accent, #2563eb));
   color: #fff;
   box-shadow: 0 14px 28px rgba(20, 32, 51, 0.24);
 }

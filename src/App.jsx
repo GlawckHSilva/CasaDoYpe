@@ -73,6 +73,7 @@ const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
 const canUsePasswordAdmin = Boolean(adminPassword);
 const fallbackOwnerWhatsapp = import.meta.env.VITE_OWNER_WHATSAPP || '43998108328';
 const fallbackOwnerEmail = import.meta.env.VITE_OWNER_EMAIL || adminEmail;
+const existingAccountMessage = 'Esse cadastro já existe. Use Login ou Recuperar senha para acessar.';
 const paymentLabels = {
   pix: 'Pix',
   card: 'Cartão',
@@ -477,6 +478,31 @@ function isPrivilegedEmail(email) {
   return isSuperAdminEmail(email) || isAdminEmail(email);
 }
 
+function isExistingAccountError(error) {
+  return /already|registered|exists|user_already_exists|email_exists|ja tem cadastro|já tem cadastro/i.test(error?.message || '');
+}
+
+function isExistingAccountResponse(data) {
+  return Boolean(data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0);
+}
+
+function getPasswordRecoveryRedirect() {
+  if (typeof window === 'undefined') return undefined;
+  return `${window.location.origin}/resetar-senha`;
+}
+
+function isPasswordRecoveryUrl() {
+  if (typeof window === 'undefined') return false;
+  const url = new URL(window.location.href);
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
+  return (
+    url.pathname === '/resetar-senha' ||
+    url.searchParams.get('type') === 'recovery' ||
+    url.searchParams.get('recovery') === '1' ||
+    hash.get('type') === 'recovery'
+  );
+}
+
 function scrollToSection(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -570,7 +596,7 @@ export default function App() {
   const [authProfile, setAuthProfile] = useState(null);
   const [authChecked, setAuthChecked] = useState(!hasSupabaseConfig);
   const [authOpen, setAuthOpen] = useState(false);
-  const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(false);
+  const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(() => isPasswordRecoveryUrl());
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(() => readLocalData('themeMode', 'light'));
   const [message, setMessage] = useState('');
@@ -837,12 +863,16 @@ export default function App() {
     if (!hasSupabaseConfig) return undefined;
 
     supabase.auth.getSession().then(async ({ data }) => {
+      if (isPasswordRecoveryUrl()) setPasswordRecoveryOpen(true);
       const profile = await resolveAuthProfile(data.session);
       if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
     });
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'PASSWORD_RECOVERY') setPasswordRecoveryOpen(true);
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryOpen(true);
+        navigateTo('/resetar-senha');
+      }
       const profile = await resolveAuthProfile(session);
       if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
     });
@@ -1414,6 +1444,27 @@ export default function App() {
             navigateTo(roleHomePath(profile.role));
           }}
           resolveAuthProfile={resolveAuthProfile}
+        />
+        {passwordRecoveryOpen ? (
+          <PasswordRecoveryModal
+            onClose={() => {
+              setPasswordRecoveryOpen(false);
+              navigateTo('/login');
+            }}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (route === '/resetar-senha') {
+    return (
+      <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
+        <PasswordRecoveryModal
+          onClose={() => {
+            setPasswordRecoveryOpen(false);
+            navigateTo('/login');
+          }}
         />
       </div>
     );
@@ -2689,7 +2740,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
     }
     const { error: resetError } = await safeSupabaseQuery(
       supabase.auth.resetPasswordForEmail(form.email.trim(), {
-        redirectTo: window.location.origin,
+        redirectTo: getPasswordRecoveryRedirect(),
       }),
       15000,
       'Recuperacao de senha excedeu o tempo limite.',
@@ -2698,7 +2749,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       setError('Não foi possível enviar a recuperação de senha agora.');
       return;
     }
-    setNotice('Enviamos um link de recuperação para esse e-mail.');
+    setNotice('Se esse e-mail estiver cadastrado, enviaremos um link para criar uma nova senha.');
   }
 
   async function submit(event) {
@@ -2746,17 +2797,19 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
           setError('O cadastro demorou demais. Confira sua conexao e tente novamente.');
           return;
         }
-        const alreadyRegistered = /already|registered|exists/i.test(signUpError.message || '');
-        setError(
-          alreadyRegistered
-            ? 'Este e-mail já tem cadastro. Use Login ou Recuperar senha.'
-            : 'Não foi possível criar a conta de hóspede. Confira os dados.',
-        );
+        if (isExistingAccountError(signUpError)) {
+          setError(existingAccountMessage);
+          setNotice('Entre com sua senha ou clique em Recuperar senha para receber um novo link.');
+          setMode('login');
+          return;
+        }
+        setError('Não foi possível criar a conta de hóspede. Confira os dados.');
         setSubmitting(false);
         return;
       }
-      if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-        setError('Este e-mail ja tem cadastro. Use Login ou Recuperar senha.');
+      if (isExistingAccountResponse(data)) {
+        setError(existingAccountMessage);
+        setNotice('Entre com sua senha ou clique em Recuperar senha para receber um novo link.');
         setMode('login');
         return;
       }
@@ -2956,11 +3009,16 @@ function PasswordRecoveryModal({ onClose }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
     setMessage('');
     setError('');
+    if (!hasSupabaseConfig) {
+      setError('Recuperação de senha precisa do Supabase configurado.');
+      return;
+    }
     if (password.length < 6) {
       setError('Use uma senha com pelo menos 6 caracteres.');
       return;
@@ -2969,12 +3027,34 @@ function PasswordRecoveryModal({ onClose }) {
       setError('As senhas não conferem.');
       return;
     }
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    if (updateError) {
-      setError('Não foi possível alterar a senha agora.');
-      return;
+    setSubmitting(true);
+    try {
+      const { data: sessionData, error: sessionError } = await safeSupabaseQuery(
+        supabase.auth.getSession(),
+        8000,
+        'Validacao do link excedeu o tempo limite.',
+      );
+      if (sessionError || !sessionData?.session) {
+        setError('Abra o link de recuperação enviado por e-mail antes de criar a nova senha.');
+        return;
+      }
+      const { error: updateError } = await safeSupabaseQuery(
+        supabase.auth.updateUser({ password }),
+        15000,
+        'Alteracao de senha excedeu o tempo limite.',
+      );
+      if (updateError) {
+        setError('Não foi possível alterar a senha agora. Solicite um novo link e tente novamente.');
+        return;
+      }
+      setPassword('');
+      setConfirmPassword('');
+      setMessage('Senha alterada. Você já pode entrar normalmente.');
+    } catch {
+      setError('Não foi possível alterar a senha agora. Tente novamente.');
+    } finally {
+      setSubmitting(false);
     }
-    setMessage('Senha alterada. Você já pode entrar normalmente.');
   }
 
   return (
@@ -3010,9 +3090,9 @@ function PasswordRecoveryModal({ onClose }) {
               required
             />
           </Field>
-          <Button type="submit">
+          <Button type="submit" disabled={submitting}>
             <Save size={18} />
-            Salvar nova senha
+            {submitting ? 'Salvando...' : 'Salvar nova senha'}
           </Button>
           {error ? <p className="text-sm font-semibold text-red-700">{error}</p> : null}
           {message ? <p className="text-sm font-semibold text-leaf">{message}</p> : null}
