@@ -229,6 +229,22 @@ function writeLocalData(key, value) {
   window.localStorage.setItem(`casa-do-ype:${key}`, JSON.stringify(value));
 }
 
+async function safeSupabaseQuery(query, timeoutMs = 12000) {
+  let timerId;
+  const timeout = new Promise((resolve) => {
+    timerId = setTimeout(() => resolve({ data: null, error: new Error('Consulta inicial excedeu o tempo limite.') }), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      Promise.resolve(query).catch((error) => ({ data: null, error })),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timerId);
+  }
+}
+
 function mixHex(color, target, amount) {
   const source = normalizeHexColor(color).slice(1).match(/.{2}/g).map((part) => parseInt(part, 16));
   const goal = normalizeHexColor(target).slice(1).match(/.{2}/g).map((part) => parseInt(part, 16));
@@ -693,44 +709,47 @@ export default function App() {
       return;
     }
 
-    const [
-      { data: propertyRows },
-      { data: photoRows },
-      { data: reservationRows },
-      { data: movementRows },
-      { data: interestRows },
-      { data: profileRows },
-      { data: licenseRows },
-      { data: licenseHistoryRows },
-      { data: paymentSettingRows },
-    ] =
-      await Promise.all([
-        supabase.from('properties').select('*').order('created_at'),
-        supabase.from('property_photos').select('*').order('sort_order'),
-        supabase.from('reservations').select('*').order('check_in'),
-        supabase.from('cash_movements').select('*').order('due_date', { ascending: false }),
-        supabase.from('interest_settings').select('*').eq('active', true).order('installments'),
-        supabase.from('profiles').select('*').order('created_at'),
-        supabase.from('licenses').select('*').order('expires_at', { ascending: true }),
-        supabase.from('license_history').select('*').order('created_at', { ascending: false }),
-        supabase.from('payment_settings').select('*').order('created_at'),
-      ]);
+    try {
+      const [
+        { data: propertyRows },
+        { data: photoRows },
+        { data: reservationRows },
+        { data: movementRows },
+        { data: interestRows },
+        { data: profileRows },
+        { data: licenseRows },
+        { data: licenseHistoryRows },
+        { data: paymentSettingRows },
+      ] =
+        await Promise.all([
+          safeSupabaseQuery(supabase.from('properties').select('*').order('created_at')),
+          safeSupabaseQuery(supabase.from('property_photos').select('*').order('sort_order')),
+          safeSupabaseQuery(supabase.from('reservations').select('*').order('check_in')),
+          safeSupabaseQuery(supabase.from('cash_movements').select('*').order('due_date', { ascending: false })),
+          safeSupabaseQuery(supabase.from('interest_settings').select('*').eq('active', true).order('installments')),
+          safeSupabaseQuery(supabase.from('profiles').select('*').order('created_at')),
+          safeSupabaseQuery(supabase.from('licenses').select('*').order('expires_at', { ascending: true })),
+          safeSupabaseQuery(supabase.from('license_history').select('*').order('created_at', { ascending: false })),
+          safeSupabaseQuery(supabase.from('payment_settings').select('*').order('created_at')),
+        ]);
 
-    if (propertyRows?.length) {
-      setProperties(propertyRows);
-      setSelectedPropertyId(propertyRows[0].id);
+      if (propertyRows?.length) {
+        setProperties(propertyRows);
+        setSelectedPropertyId(propertyRows[0].id);
+      }
+      if (photoRows?.length) setPhotos(photoRows);
+      if (reservationRows?.length) setReservations(reservationRows);
+      if (movementRows?.length) setCashMovements(movementRows);
+      if (interestRows?.length) {
+        setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
+      }
+      if (profileRows?.length) setProfiles(profileRows);
+      if (licenseRows?.length) setLicenses(licenseRows);
+      if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
+      if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
+    } finally {
+      setLoading(false);
     }
-    if (photoRows?.length) setPhotos(photoRows);
-    if (reservationRows?.length) setReservations(reservationRows);
-    if (movementRows?.length) setCashMovements(movementRows);
-    if (interestRows?.length) {
-      setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
-    }
-    if (profileRows?.length) setProfiles(profileRows);
-    if (licenseRows?.length) setLicenses(licenseRows);
-    if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
-    if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
-    setLoading(false);
   }
 
   async function resolveAuthProfile(session) {
