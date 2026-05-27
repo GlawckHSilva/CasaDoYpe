@@ -2746,6 +2746,10 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       'Recuperacao de senha excedeu o tempo limite.',
     );
     if (resetError) {
+      if (resetError.code === 'email_address_invalid' || /email.*invalid|invalid.*email/i.test(resetError.message || '')) {
+        setError('Informe um e-mail válido para receber a recuperação de senha.');
+        return;
+      }
       setError('Não foi possível enviar a recuperação de senha agora.');
       return;
     }
