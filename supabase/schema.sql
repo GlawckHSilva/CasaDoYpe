@@ -1,6 +1,7 @@
 create table if not exists public.properties (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid references auth.users(id) on delete set null,
+  slug text unique,
   name text not null,
   city text not null,
   headline text not null,
@@ -95,6 +96,9 @@ end $$;
 
 alter table public.properties
   add column if not exists owner_id uuid references auth.users(id) on delete set null;
+
+alter table public.properties
+  add column if not exists slug text unique;
 
 alter table public.properties
   add column if not exists owner_whatsapp text;
@@ -347,6 +351,19 @@ alter table public.suggestions
 alter table public.suggestions
   add column if not exists email text;
 
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,
+  user_email text,
+  name text,
+  subject text not null,
+  category text not null default 'duvida' check (category in ('erro', 'duvida', 'sugestao')),
+  message text not null,
+  status text not null default 'new' check (status in ('new', 'read', 'done')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.admin_logs (
   id uuid primary key default gen_random_uuid(),
   actor_email text,
@@ -379,6 +396,7 @@ alter table public.cash_movements enable row level security;
 alter table public.payments enable row level security;
 alter table public.vouchers enable row level security;
 alter table public.suggestions enable row level security;
+alter table public.support_tickets enable row level security;
 alter table public.admin_logs enable row level security;
 alter table public.interest_settings enable row level security;
 alter table public.payment_settings enable row level security;
@@ -747,6 +765,9 @@ drop policy if exists "Users can read own vouchers" on public.vouchers;
 drop policy if exists "Admins can manage vouchers" on public.vouchers;
 drop policy if exists "Authenticated users can send suggestions" on public.suggestions;
 drop policy if exists "Admins can read suggestions" on public.suggestions;
+drop policy if exists "Authenticated users can send support tickets" on public.support_tickets;
+drop policy if exists "Users can read own support tickets" on public.support_tickets;
+drop policy if exists "Super admins can manage support tickets" on public.support_tickets;
 drop policy if exists "Admins can manage logs" on public.admin_logs;
 drop policy if exists "Public can read interest settings" on public.interest_settings;
 drop policy if exists "Admins can manage interest settings" on public.interest_settings;
@@ -937,6 +958,19 @@ create policy "Authenticated users can send suggestions"
 create policy "Admins can read suggestions"
   on public.suggestions for select
   using (public.is_super_admin() or public.is_owner());
+
+create policy "Authenticated users can send support tickets"
+  on public.support_tickets for insert
+  with check (auth.role() = 'authenticated' and (user_id = auth.uid() or user_id is null));
+
+create policy "Users can read own support tickets"
+  on public.support_tickets for select
+  using (public.is_super_admin() or user_id = auth.uid() or user_email = auth.email());
+
+create policy "Super admins can manage support tickets"
+  on public.support_tickets for all
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
 
 create policy "Admins can manage logs"
   on public.admin_logs for all
