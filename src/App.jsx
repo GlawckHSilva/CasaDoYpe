@@ -1,43 +1,60 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  BadgeDollarSign,
   BarChart3,
+  Bath,
   BedDouble,
+  Bell,
   Building2,
   Banknote,
   CalendarDays,
+  Car,
   ChevronLeft,
   ChevronRight,
   Check,
+  ChartColumnIncreasing,
+  CircleUserRound,
   ClipboardList,
   Copy,
   CreditCard,
   DoorOpen,
+  Eye,
   FileText,
   Home,
+  Headset,
   ImagePlus,
   Instagram,
+  KeyRound,
   LifeBuoy,
+  Lightbulb,
+  Link2,
   Lock,
   LogOut,
+  Logs,
   Mail,
   MapPin,
   MessageCircle,
   Moon,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Settings,
   ShieldCheck,
+  Snowflake,
   Sparkles,
   Sun,
   Trash2,
   Twitter,
+  UtensilsCrossed,
   User,
   UserPlus,
   Users,
   Wallet,
+  Waves,
+  Wifi,
   X,
 } from 'lucide-react';
 import {
@@ -56,7 +73,7 @@ import {
 import { ptBR } from 'date-fns/locale';
 import { jsPDF } from 'jspdf';
 import { demoPhotos, demoProperties, demoProperty, demoReservations } from './data/demo';
-import { hasSupabaseConfig, supabase } from './lib/supabase';
+import { hasSupabaseConfig, supabase, supabaseConfig } from './lib/supabase';
 
 const currency = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -86,6 +103,55 @@ const socialLinks = {
   email: `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(commercialEmail)}`,
   twitter: import.meta.env.VITE_SOCIAL_X || 'https://x.com/hospedex',
 };
+const brandAssets = {
+  horizontal: '/brand/hospedex-logo-horizontal.svg',
+  vertical: '/brand/hospedex-logo-vertical.svg',
+  mark: '/brand/hospedex-mark.svg',
+  white: '/brand/hospedex-logo-white.svg',
+  blue: '/brand/hospedex-logo-blue.svg',
+};
+const panelIconMap = {
+  dashboard: BarChart3,
+  calendar_month: CalendarDays,
+  event_available: CalendarDays,
+  pending_actions: ClipboardList,
+  task_alt: Check,
+  cancel: X,
+  support_agent: Headset,
+  settings: Settings,
+  person: CircleUserRound,
+  manage_accounts: CircleUserRound,
+  admin_panel_settings: Users,
+  group: Users,
+  groups: Users,
+  verified_user: ShieldCheck,
+  home_work: Home,
+  account_balance_wallet: Wallet,
+  payments: ChartColumnIncreasing,
+  description: FileText,
+  vpn_key: KeyRound,
+  forum: Lightbulb,
+  image: ImagePlus,
+  refresh: RefreshCw,
+  warning: AlertTriangle,
+  mail: Mail,
+  redeem: BadgeDollarSign,
+  logout: LogOut,
+  lock: Lock,
+  person_add: UserPlus,
+  close: X,
+};
+const amenityIconRules = [
+  [/wi-?fi|internet/, Wifi],
+  [/piscina|pool/, Waves],
+  [/churrasqueira|barbecue|grelha/, UtensilsCrossed],
+  [/estacionamento|garagem|vaga|carro/, Car],
+  [/ar condicionado|climatiza|ventila|split/, Snowflake],
+  [/quarto|cama|suite|suíte/, BedDouble],
+  [/banheiro|banho/, Bath],
+  [/hospede|hóspede|pessoa|grupo/, Users],
+  [/diaria|diária|valor|preco|preço/, Wallet],
+];
 const existingAccountMessage = 'Este email ja esta cadastrado.';
 const authRequestTimeoutMs = 8000;
 const profileRequestTimeoutMs = 3500;
@@ -304,6 +370,18 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 72);
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function getAmenityIcon(label) {
+  const normalized = normalizeSearchText(label);
+  return amenityIconRules.find(([pattern]) => pattern.test(normalized))?.[1] || Check;
 }
 
 function ensurePropertySlug(property, existing = []) {
@@ -682,19 +760,47 @@ function MaterialIcon({ name, className = '', size = 20 }) {
   );
 }
 
+function PanelIcon({ icon, className = '', size = 18 }) {
+  if (typeof icon === 'function') {
+    const Icon = icon;
+    return <Icon className={className} size={size} aria-hidden="true" />;
+  }
+  const Icon = panelIconMap[icon];
+  if (Icon) return <Icon className={className} size={size} aria-hidden="true" />;
+  return <MaterialIcon name={icon} className={className} size={size} />;
+}
+
+function BrandLogo({ variant = 'horizontal', className = 'h-10 w-auto', alt = 'Hospedex' }) {
+  return <img className={className} src={brandAssets[variant] || brandAssets.horizontal} alt={alt} />;
+}
+
+function LoadingScreen({ label = 'Carregando Hospedex...' }) {
+  return (
+    <div className="grid min-h-screen place-items-center bg-[#f6f8fb] p-6 text-ink">
+      <div className="grid justify-items-center gap-4 text-center">
+        <BrandLogo variant="vertical" className="h-40 w-auto" />
+        <div className="h-1.5 w-44 overflow-hidden rounded-full bg-blue-100">
+          <span className="block h-full w-1/2 animate-pulse rounded-full bg-leaf" />
+        </div>
+        <p className="text-sm font-bold text-ink/60">{label}</p>
+      </div>
+    </div>
+  );
+}
+
 function Button({ children, className = '', variant = 'primary', ...props }) {
   const variants = {
     primary: 'btn-primary-theme',
     secondary: 'btn-secondary-theme',
     ghost:
-      'bg-white/85 text-ink shadow-[0_10px_24px_rgba(255,255,255,0.18)] backdrop-blur hover:bg-white',
+      'bg-white/90 text-ink shadow-[0_10px_24px_rgba(255,255,255,0.18)] backdrop-blur hover:bg-white',
     outline:
-      'border border-blue-200 bg-gradient-to-r from-white to-blue-50 text-ink shadow-sm hover:border-blue-300 hover:from-blue-50 hover:to-white',
+      'border border-blue-200 bg-white text-ink shadow-sm hover:border-blue-300 hover:bg-blue-50',
   };
 
   return (
     <button
-      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60 ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-bold transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60 ${variants[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -2079,9 +2185,9 @@ export default function App() {
         <section className="border-b border-ink/10 bg-white dark:border-white/10 dark:bg-slate-900">
           <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:grid-cols-2 sm:px-6 lg:grid-cols-4 lg:px-8">
             <InfoStat icon={BedDouble} label="Quartos" value={property.bedrooms} />
-            <InfoStat icon={DoorOpen} label="Banheiros" value={property.bathrooms} />
+            <InfoStat icon={Bath} label="Banheiros" value={property.bathrooms} />
             <InfoStat icon={Users} label="Hóspedes" value={`até ${property.max_guests}`} />
-            <InfoStat icon={CreditCard} label="Diária" value={currency.format(property.daily_rate)} />
+            <InfoStat icon={Wallet} label="Diária" value={currency.format(property.daily_rate)} />
           </div>
         </section>
 
@@ -2089,12 +2195,15 @@ export default function App() {
           <div>
             <p className="text-base leading-8 text-ink/75 dark:text-white/75">{property.description}</p>
             <div className="mt-8 grid gap-3 sm:grid-cols-2">
-              {property.amenities?.map((item) => (
-                <div key={item} className="flex items-center gap-3 rounded-md bg-white px-4 py-3 shadow-sm dark:bg-slate-900 dark:text-white dark:ring-1 dark:ring-white/10">
-                  <Check className="text-leaf" size={18} />
-                  <span className="font-semibold">{item}</span>
-                </div>
-              ))}
+              {property.amenities?.map((item) => {
+                const AmenityIcon = getAmenityIcon(item);
+                return (
+                  <div key={item} className="flex items-center gap-3 rounded-md bg-white px-4 py-3 shadow-sm dark:bg-slate-900 dark:text-white dark:ring-1 dark:ring-white/10">
+                    <AmenityIcon className="text-leaf" size={18} />
+                    <span className="font-semibold">{item}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <aside className="rounded-md border border-ink/10 bg-white p-5 shadow-soft dark:border-white/10 dark:bg-slate-900 dark:text-white">
@@ -2399,8 +2508,11 @@ export default function App() {
 
       <footer className="border-t border-ink/10 bg-ink px-4 py-8 text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="font-semibold">{property.name}</p>
-          <p className="text-sm text-white/70">Reservas, calendario e check-in online.</p>
+          <div>
+            <BrandLogo variant="white" className="h-10 w-auto max-w-[220px]" />
+            <p className="mt-2 text-sm font-semibold text-white/80">{property.name}</p>
+          </div>
+          <p className="text-sm text-white/70">Reservas, calendário e check-in online.</p>
         </div>
       </footer>
 
@@ -2516,46 +2628,63 @@ function PublicTopBar({
 }) {
   const [open, setOpen] = useState(false);
   const role = normalizeRole(authProfile?.role);
-  const linkClass = `transition ${transparent ? 'hover:text-white' : 'hover:text-leaf'}`;
+  const linkClass = `inline-flex items-center gap-2 transition ${transparent ? 'hover:text-white' : 'hover:text-leaf'}`;
   const menuItems =
     role === 'super_admin'
       ? [
-          ['Painel super admin', () => onOpenSuperAdmin?.('dashboard')],
-          ['Usuários', () => onOpenSuperAdmin?.('users')],
-          ['Licenças', () => onOpenSuperAdmin?.('licenses')],
-          ['Sugestões', () => onOpenSuperAdmin?.('suggestions')],
-          ['Logs', () => onOpenSuperAdmin?.('settings')],
-          ['Banners/Home', () => onOpenSuperAdmin?.('banners')],
+          ['Painel super admin', () => onOpenSuperAdmin?.('dashboard'), ShieldCheck],
+          ['Usuários', () => onOpenSuperAdmin?.('users'), Users],
+          ['Licenças', () => onOpenSuperAdmin?.('licenses'), KeyRound],
+          ['Sugestões', () => onOpenSuperAdmin?.('suggestions'), Lightbulb],
+          ['Logs', () => onOpenSuperAdmin?.('settings'), Logs],
+          ['Banners/Home', () => onOpenSuperAdmin?.('banners'), ImagePlus],
         ]
       : role === 'proprietario'
         ? [
-            ['Meu perfil', () => onOpenAdmin?.('admin')],
-            ['Minhas propriedades', () => onOpenAdmin?.('houses')],
-            ['Reservas', () => onOpenAdmin?.('reservations')],
-            ['Financeiro', () => onOpenAdmin?.('cash')],
-            ['Copiar links', () => onOpenAdmin?.('houses')],
+            ['Meu perfil', () => onOpenAdmin?.('admin'), CircleUserRound],
+            ['Minhas propriedades', () => onOpenAdmin?.('houses'), Home],
+            ['Reservas', () => onOpenAdmin?.('reservations'), CalendarDays],
+            ['Financeiro', () => onOpenAdmin?.('cash'), Wallet],
+            ['Copiar links', () => onOpenAdmin?.('houses'), Link2],
           ]
         : role === 'hospede'
           ? [
-              ['Meu perfil', () => onOpenClient?.('profile')],
-              ['Minhas reservas', () => onOpenClient?.('reservations')],
-              ['Suporte', () => onOpenClient?.('support')],
+              ['Meu perfil', () => onOpenClient?.('profile'), CircleUserRound],
+              ['Minhas reservas', () => onOpenClient?.('reservations'), CalendarDays],
+              ['Suporte', () => onOpenClient?.('support'), Headset],
+              ['Configurações', () => onOpenClient?.('settings'), Settings],
             ]
           : [];
+  const openSupport = () => {
+    if (role === 'hospede') onOpenClient?.('support');
+    else if (role === 'super_admin') onOpenSuperAdmin?.('support');
+    else onOpenAdmin?.('settings');
+  };
+  const openSettings = () => {
+    if (role === 'hospede') onOpenClient?.('settings');
+    else if (role === 'super_admin') onOpenSuperAdmin?.('settings');
+    else onOpenAdmin?.('settings');
+  };
 
   return (
-    <header className={`sticky top-0 z-30 border-b backdrop-blur ${transparent ? 'border-white/15 bg-ink/70 text-white' : 'border-ink/10 bg-white/95 text-ink shadow-sm'}`}>
+    <header className={`sticky top-0 z-30 border-b backdrop-blur ${transparent ? 'border-white/15 bg-ink/75 text-white' : 'border-ink/10 bg-white/95 text-ink shadow-sm'}`}>
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-        <button type="button" className="flex items-center gap-3 font-black" onClick={() => onNavigate('/')}>
-          <span className="grid h-10 w-10 place-items-center rounded-md bg-leaf text-white">
-            <DoorOpen size={20} />
-          </span>
-          Hospedex
+        <button type="button" className="flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
+          <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-10 w-auto max-w-[168px] sm:max-w-[204px]" />
         </button>
         <nav className="hidden items-center gap-5 text-sm font-bold md:flex">
-          <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>Hospedagens</button>
-          <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>Planos</button>
-          <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>Sobre</button>
+          <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>
+            <Home size={16} />
+            Hospedagens
+          </button>
+          <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>
+            <BadgeDollarSign size={16} />
+            Planos
+          </button>
+          <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
+            <ShieldCheck size={16} />
+            Sobre
+          </button>
           <a className={linkClass} href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram">
             <Instagram size={18} />
           </a>
@@ -2567,38 +2696,51 @@ function PublicTopBar({
           </a>
         </nav>
         {authProfile ? (
-          <div className="relative">
+          <div className="relative flex items-center gap-2">
+            <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={openSupport} aria-label="Suporte" title="Suporte">
+              <Headset size={18} />
+            </button>
+            <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={openSettings} aria-label="Configurações" title="Configurações">
+              <Settings size={18} />
+            </button>
+            <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={() => setOpen((current) => !current)} aria-label="Notificações" title="Notificações">
+              <Bell size={18} />
+            </button>
             <button
               type="button"
-              className="grid h-11 w-11 place-items-center rounded-full border border-ink/10 bg-white text-ink shadow-sm"
+              className="brand-icon-button"
               onClick={() => setOpen((current) => !current)}
               aria-label="Abrir menu do usuário"
+              title="Perfil"
             >
               <User size={19} />
             </button>
             {open ? (
-              <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-ink/10">
+              <div className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-ink/10">
                 <div className="border-b border-ink/10 px-4 py-3 text-sm">
                   <p className="font-black">{authProfile.full_name || 'Usuário'}</p>
                   <p className="truncate text-xs text-ink/55">{authProfile.email}</p>
                 </div>
-                {menuItems.map(([label, action]) => (
+                {menuItems.map(([label, action, Icon]) => (
                   <button
                     key={label}
                     type="button"
-                    className="block w-full px-4 py-3 text-left text-sm font-bold hover:bg-mist"
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-mist"
                     onClick={() => {
                       action();
                       setOpen(false);
                     }}
                   >
+                    <Icon size={17} className="text-leaf" />
                     {label}
                   </button>
                 ))}
-                <button type="button" className="block w-full px-4 py-3 text-left text-sm font-bold hover:bg-mist" onClick={() => onNavigate('/casas')}>
+                <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-mist" onClick={() => onNavigate('/casas')}>
+                  <Home size={17} className="text-leaf" />
                   Ver hospedagens
                 </button>
-                <button type="button" className="block w-full px-4 py-3 text-left text-sm font-bold text-red-700 hover:bg-red-50" onClick={onSignOut}>
+                <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-red-700 hover:bg-red-50" onClick={onSignOut}>
+                  <LogOut size={17} />
                   Sair
                 </button>
               </div>
@@ -2606,10 +2748,12 @@ function PublicTopBar({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" onClick={() => onAuth?.('login') || onNavigate('/login')}>
+            <Button type="button" variant="outline" className="px-3 sm:px-5" onClick={() => onAuth?.('login') || onNavigate('/login')}>
+              <Lock size={17} />
               Login
             </Button>
-            <Button type="button" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
+            <Button type="button" className="hidden sm:inline-flex" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
+              <UserPlus size={17} />
               Cadastrar
             </Button>
           </div>
@@ -2619,12 +2763,50 @@ function PublicTopBar({
   );
 }
 
-function PropertyCard({ property, photo, onNavigate }) {
+function SiteFooter({ onNavigate }) {
   return (
-    <article className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-ink/10 transition hover:-translate-y-0.5 hover:shadow-soft">
+    <footer className="border-t border-ink/10 bg-ink px-4 py-8 text-white">
+      <div className="mx-auto grid max-w-7xl gap-6 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div>
+          <BrandLogo variant="white" className="h-11 w-auto max-w-[220px]" />
+          <p className="mt-3 max-w-xl text-sm leading-6 text-white/70">
+            Plataforma para turismo, hospedagem e aluguel por temporada com reservas, calendario e gestao de propriedades.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 sm:justify-end">
+          <button type="button" className="brand-icon-button bg-white/10 text-white hover:text-white" onClick={() => onNavigate?.('/casas')} aria-label="Hospedagens" title="Hospedagens">
+            <Home size={18} />
+          </button>
+          <a className="brand-icon-button bg-white/10 text-white hover:text-white" href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram" title="Instagram">
+            <Instagram size={18} />
+          </a>
+          <a className="brand-icon-button bg-white/10 text-white hover:text-white" href={socialLinks.email} target="_blank" rel="noreferrer" aria-label="Email" title="Email">
+            <Mail size={18} />
+          </a>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+function PropertyCard({ property, photo, onNavigate }) {
+  const stats = [
+    [BedDouble, property.bedrooms || 1, 'quartos'],
+    [Bath, property.bathrooms || 1, 'banheiros'],
+    [Users, property.max_guests || 1, 'hóspedes'],
+  ];
+
+  return (
+    <article className="brand-card brand-card-hover overflow-hidden rounded-md">
       <button type="button" className="block w-full text-left" onClick={() => onNavigate(propertyPath(property))}>
-        <img className="h-56 w-full object-cover" src={photo?.url || placeholderPhoto.url} alt={photo?.alt || property.name} />
-        <div className="grid gap-2 p-4">
+        <div className="relative">
+          <img className="h-56 w-full object-cover" src={photo?.url || placeholderPhoto.url} alt={photo?.alt || property.name} />
+          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-black text-ink shadow-sm">
+            <Wallet size={14} className="text-leaf" />
+            {currency.format(property.daily_rate || 0)}
+          </span>
+        </div>
+        <div className="grid gap-3 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-black">{property.name}</h3>
@@ -2633,12 +2815,26 @@ function PropertyCard({ property, photo, onNavigate }) {
                 {property.city || 'Cidade não informada'}
               </p>
             </div>
-            <span className="rounded-md bg-leaf/10 px-2 py-1 text-xs font-black text-leaf">{property.max_guests || 1} hóspedes</span>
+            <span className="rounded-md bg-leaf/10 px-2 py-1 text-xs font-black text-leaf">Premium</span>
           </div>
           <p className="text-sm text-ink/65 line-clamp-2">{property.headline || property.description || 'Hospedagem cadastrada no Hospedex.'}</p>
+          <div className="grid grid-cols-3 gap-2">
+            {stats.map(([Icon, value, label]) => (
+              <span key={label} className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[#f6f8fb] px-2 py-2 text-xs font-bold text-ink/70">
+                <Icon size={15} className="text-leaf" />
+                {value}
+              </span>
+            ))}
+          </div>
           <div className="flex items-center justify-between gap-3 border-t border-ink/10 pt-3">
-            <strong>{currency.format(property.daily_rate || 0)} / diária</strong>
-            <span className="text-sm font-black text-leaf">Ver detalhes</span>
+            <strong className="inline-flex items-center gap-2 text-sm">
+              <BadgeDollarSign size={16} className="text-leaf" />
+              / diária
+            </strong>
+            <span className="inline-flex items-center gap-1 text-sm font-black text-leaf">
+              <Eye size={16} />
+              Ver
+            </span>
           </div>
         </div>
       </button>
@@ -2818,6 +3014,7 @@ function MarketingHome({
           )}
         </section>
       </main>
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   );
 }
@@ -2870,6 +3067,7 @@ function HousesListingPage({
           )}
         </div>
       </main>
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   );
 }
@@ -2936,6 +3134,7 @@ function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient,
           ))}
         </div>
       </main>
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   );
 }
@@ -3004,6 +3203,7 @@ function AboutPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient,
           </div>
         </aside>
       </main>
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   );
 }
@@ -3027,7 +3227,7 @@ function AccessDenied({ title, text, onLogin, onHome }) {
   return (
     <div className="grid min-h-screen place-items-center bg-[#f4f8ff] p-4 text-ink">
       <div className="w-full max-w-md rounded-md bg-white p-6 text-center shadow-soft">
-        <MaterialIcon name="lock" className="text-red-600" size={42} />
+        <Lock className="mx-auto text-red-600" size={42} aria-hidden="true" />
         <h1 className="mt-3 text-2xl font-black">{title}</h1>
         <p className="mt-2 text-sm leading-6 text-ink/65">{text}</p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -3356,7 +3556,7 @@ function SuperAdminDashboard({
       <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
         <aside className="border-r border-ink/10 bg-white p-4">
           <div className="flex items-center gap-3 rounded-md bg-ink p-4 text-white">
-            <MaterialIcon name="admin_panel_settings" size={28} />
+            <ShieldCheck size={28} />
             <div>
               <p className="font-black">Super Admin</p>
               <p className="text-xs text-white/65">{authProfile?.email}</p>
@@ -3372,7 +3572,7 @@ function SuperAdminDashboard({
                 }`}
                 onClick={() => setView(key)}
               >
-                <MaterialIcon name={icon} size={20} />
+                <PanelIcon icon={icon} size={20} />
                 {label}
               </button>
             ))}
@@ -3394,7 +3594,7 @@ function SuperAdminDashboard({
             </div>
             <div className="grid gap-2 sm:grid-cols-[auto_minmax(220px,320px)]">
               <Button type="button" variant="outline" onClick={refreshDashboardData} disabled={refreshing} className="min-h-11 px-4">
-                <MaterialIcon name="refresh" size={18} />
+                <RefreshCw size={18} />
                 {refreshing ? 'Atualizando' : 'Atualizar'}
               </Button>
               <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar licenças, proprietários..." />
@@ -3591,7 +3791,7 @@ function SuperAdminDashboard({
                   <TextArea value={licenseDraft.notes} onChange={(event) => setLicenseDraft({ ...licenseDraft, notes: event.target.value })} />
                 </Field>
                 <Button type="submit">
-                  <MaterialIcon name="vpn_key" />
+                  <KeyRound size={18} aria-hidden="true" />
                   Gerar chave
                 </Button>
               </form>
@@ -3726,7 +3926,7 @@ function SuperAdminDashboard({
                             });
                           }}
                         >
-                          <MaterialIcon name="save" size={18} />
+                          <Save size={18} aria-hidden="true" />
                           Salvar alterações
                         </Button>
                       </div>
@@ -3783,7 +3983,7 @@ function buildGrowthRows(profiles) {
 function SuperStat({ icon, label, value }) {
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
-      <MaterialIcon name={icon} className="text-leaf" size={24} />
+      <PanelIcon icon={icon} className="text-leaf" size={24} />
       <p className="mt-3 text-xs font-bold uppercase tracking-wide text-ink/50">{label}</p>
       <p className="mt-1 text-xl font-black">{value}</p>
     </div>
@@ -3916,11 +4116,20 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const configNotice = !hasSupabaseConfig
+    ? supabaseConfig.isPlaceholder
+      ? 'As variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY ainda estão com valores de exemplo.'
+      : 'Cadastro e login precisam das variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no build.'
+    : '';
   const socialProviders = [
     ['google', 'Google'],
     ['facebook', 'Facebook'],
     ['apple', 'Apple'],
   ];
+
+  useEffect(() => {
+    setMode(initialMode || 'login');
+  }, [initialMode]);
 
   async function signInWithProvider(provider) {
     setError('');
@@ -4088,16 +4297,14 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/60 p-4 backdrop-blur">
-      <form className="grid w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft sm:max-w-lg sm:p-6" onSubmit={submit}>
+      <form className="brand-card grid w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft sm:max-w-lg sm:p-6" onSubmit={submit}>
         <div className="flex justify-end">
           <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar login" className="min-h-9 px-3 py-1.5">
-            <MaterialIcon name="close" size={16} />
+            <X size={16} />
           </Button>
         </div>
-        <div className="grid justify-items-center gap-1.5 text-center">
-          <div className="grid h-10 w-10 place-items-center rounded-md text-white" style={{ background: 'var(--property-accent)' }}>
-            <MaterialIcon name="door_open" size={20} />
-          </div>
+        <div className="grid justify-items-center gap-2 text-center">
+          <BrandLogo variant="vertical" className="h-28 w-auto" />
           <h2 className="text-xl font-black">{mode === 'login' ? 'Login' : 'Cadastro'}</h2>
           <p className="max-w-xs text-xs leading-5 text-ink/55">
             {mode === 'login'
@@ -4131,7 +4338,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
         </div>
         {!hasSupabaseConfig ? (
           <p className="mt-4 rounded-md bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-            Cadastro de usuários está desativado até conectar o Supabase na Vercel.
+            {configNotice}
           </p>
         ) : null}
         <div className="mt-4 grid gap-3.5">
@@ -4165,7 +4372,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
             />
           </Field>
           <Button type="submit" disabled={submitting}>
-            <MaterialIcon name={mode === 'login' ? 'lock' : 'person_add'} size={18} />
+            {mode === 'login' ? <Lock size={18} /> : <UserPlus size={18} />}
             {submitting ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Cadastrar'}
           </Button>
           {mode === 'login' && hasSupabaseConfig ? (
@@ -4343,10 +4550,6 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   ];
 
   useEffect(() => {
-    setMode(initialMode || 'login');
-  }, [initialMode]);
-
-  useEffect(() => {
     setView(initialView || 'dashboard');
   }, [initialView]);
 
@@ -4403,13 +4606,13 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                 }`}
                 onClick={() => setView(key)}
               >
-                <MaterialIcon name={icon} size={18} />
+                <PanelIcon icon={icon} size={18} />
                 {label}
               </button>
             ))}
           </nav>
           <Button type="button" variant="outline" onClick={onSignOut} className="mt-5 w-full">
-            <MaterialIcon name="logout" size={18} />
+            <LogOut size={18} />
             Sair
           </Button>
         </aside>
@@ -4638,7 +4841,7 @@ function SuggestionForm({ authProfile, onSubmit }) {
         />
       </Field>
       <Button type="submit">
-        <MaterialIcon name="mail" size={18} />
+        <Mail size={18} aria-hidden="true" />
         {status === 'loading' ? 'Enviando...' : 'Enviar sugestão'}
       </Button>
       {status === 'success' ? <p className="text-sm font-semibold text-green-700">Sugestão enviada com sucesso.</p> : null}
@@ -4648,10 +4851,9 @@ function SuggestionForm({ authProfile, onSubmit }) {
 }
 
 function PortalCard({ icon: Icon, label, value }) {
-  const isMaterialIcon = typeof Icon === 'string';
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
-      {isMaterialIcon ? <MaterialIcon name={Icon} className="text-leaf" size={20} /> : <Icon className="text-leaf" size={20} />}
+      <PanelIcon icon={Icon} className="text-leaf" size={20} />
       <p className="mt-3 text-xs font-bold uppercase tracking-wide text-ink/50">{label}</p>
       <p className="mt-1 text-xl font-black">{value}</p>
     </div>
@@ -4723,11 +4925,10 @@ function ManualReservationEditor({ reservation, onSave }) {
 }
 
 function InfoStat({ icon: Icon, label, value }) {
-  const isMaterialIcon = typeof Icon === 'string';
   return (
     <div className="flex items-center gap-3">
       <span className="grid h-11 w-11 place-items-center rounded-md bg-mist text-leaf dark:bg-white/10 dark:text-blue-300">
-        {isMaterialIcon ? <MaterialIcon name={Icon} size={20} /> : <Icon size={20} />}
+        <PanelIcon icon={Icon} size={20} />
       </span>
       <div>
         <p className="text-xs font-bold uppercase tracking-wide text-ink/50 dark:text-white/55">{label}</p>
@@ -4747,12 +4948,11 @@ function SummaryRow({ label, value, strong = false }) {
 }
 
 function FinanceCard({ icon: Icon, label, value }) {
-  const isMaterialIcon = typeof Icon === 'string';
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
       <div className="flex items-center gap-3">
         <span className="grid h-10 w-10 place-items-center rounded-md bg-mist text-leaf">
-          {isMaterialIcon ? <MaterialIcon name={Icon} size={18} /> : <Icon size={18} />}
+          <PanelIcon icon={Icon} size={18} />
         </span>
         <span className="text-sm font-semibold text-ink/65">{label}</span>
       </div>
@@ -5811,7 +6011,7 @@ function AdminPanel({
                     }`}
                     onClick={() => setAdminView(key)}
                   >
-                    <MaterialIcon name={icon} size={18} />
+                    <PanelIcon icon={icon} size={18} />
                     {label}
                   </button>
                 ))}

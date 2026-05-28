@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" role="img" aria-label="Hospedex">
+  <rect width="360" height="420" rx="36" fill="#fff"/>
+  <g transform="translate(92 42)">
+    <rect width="176" height="176" rx="38" fill="#0A66C2"/>
+    <path d="M36 98 88 51l52 47" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M54 98v44h68V98" fill="none" stroke="#fff" stroke-width="13" stroke-linejoin="round"/>
+    <path d="M64 131c14-13 30 13 45 0 8-8 16-8 24-3" fill="none" stroke="#38D6C9" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="132" cy="48" r="13" fill="#FFC857"/>
+  </g>
+  <text x="180" y="278" text-anchor="middle" fill="#102033" font-family="Poppins, Inter, Arial, sans-serif" font-size="44" font-weight="800">Hospedex</text>
+  <text x="180" y="315" text-anchor="middle" fill="#54708E" font-family="Poppins, Inter, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="2">TEMPORADA</text>
+</svg>

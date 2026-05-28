@@ -5,8 +5,8 @@
 @tailwind utilities;
 
 :root {
-  color: #142033;
-  background: #f4f8ff;
+  color: #102033;
+  background: #f6f8fb;
   font-family: 'Poppins', ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -28,6 +28,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   font-family: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+  background:
+    linear-gradient(180deg, rgba(10, 102, 194, 0.05), transparent 280px),
+    #f6f8fb;
 }
 
 #fotos,
@@ -60,24 +63,73 @@ textarea {
 }
 
 .btn-primary-theme {
-  background: linear-gradient(
-    135deg,
-    var(--property-accent-light, #60a5fa),
-    var(--property-accent, #2563eb),
-    var(--property-accent-dark, #142033)
-  );
+  background: linear-gradient(135deg, var(--property-accent, #0a66c2), #087f8c);
   color: #fff;
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--property-accent, #2563eb) 32%, transparent);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--property-accent, #0a66c2) 24%, transparent);
 }
 
 .btn-primary-theme:hover {
-  box-shadow: 0 18px 34px color-mix(in srgb, var(--property-accent, #2563eb) 42%, transparent);
+  box-shadow: 0 16px 30px color-mix(in srgb, var(--property-accent, #0a66c2) 32%, transparent);
 }
 
 .btn-secondary-theme {
-  background: linear-gradient(135deg, #142033, var(--property-accent-dark, #1d4ed8), var(--property-accent, #2563eb));
+  background: linear-gradient(135deg, #102033, #0a66c2);
   color: #fff;
-  box-shadow: 0 14px 28px rgba(20, 32, 51, 0.24);
+  box-shadow: 0 12px 24px rgba(16, 32, 51, 0.22);
+}
+
+.brand-card {
+  border: 1px solid rgba(16, 32, 51, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 36px rgba(16, 32, 51, 0.08);
+}
+
+.brand-card-hover {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+.brand-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgba(10, 102, 194, 0.24);
+  box-shadow: 0 20px 44px rgba(16, 32, 51, 0.13);
+}
+
+.brand-icon-button {
+  display: inline-grid;
+  min-height: 2.75rem;
+  width: 2.75rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(16, 32, 51, 0.12);
+  background: #fff;
+  color: #102033;
+  box-shadow: 0 8px 18px rgba(16, 32, 51, 0.08);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+.brand-icon-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(10, 102, 194, 0.28);
+  color: #0a66c2;
+}
+
+.brand-kicker {
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .property-fade {

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" role="img" aria-label="Hospedex">
+  <g transform="translate(28 24)">
+    <rect width="112" height="112" rx="24" fill="#fff"/>
+    <path d="M23 62 56 32l33 30" fill="none" stroke="#0A66C2" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M34 62v28h44V62" fill="none" stroke="#0A66C2" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M41 83c9-8 19 8 29 0 5-5 10-5 15-2" fill="none" stroke="#087F8C" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="85" cy="30" r="8" fill="#FFC857"/>
+  </g>
+  <text x="168" y="82" fill="#fff" font-family="Poppins, Inter, Arial, sans-serif" font-size="44" font-weight="800">Hospedex</text>
+  <text x="170" y="113" fill="#D8E7F7" font-family="Poppins, Inter, Arial, sans-serif" font-size="17" font-weight="600" letter-spacing="1.8">TEMPORADA E HOSPEDAGEM</text>
+</svg>
