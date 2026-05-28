@@ -638,6 +638,7 @@ export default function App() {
   const [reservations, setReservations] = useState(() => (hasSupabaseConfig ? [] : readLocalData('reservations', demoReservations)));
   const [cashMovements, setCashMovements] = useState(() => readLocalData('cashMovements', []));
   const [suggestions, setSuggestions] = useState(() => readLocalData('suggestions', []));
+  const [supportTickets, setSupportTickets] = useState(() => readLocalData('supportTickets', []));
   const [adminLogs, setAdminLogs] = useState(() => readLocalData('adminLogs', []));
   const [interestRates, setInterestRates] = useState(() => readLocalData('interestRates', defaultInterestRates));
   const [profiles, setProfiles] = useState(() => readLocalData('profiles', []));
@@ -809,6 +810,7 @@ export default function App() {
         { data: licenseHistoryRows },
         { data: paymentSettingRows },
         { data: suggestionRows },
+        { data: supportTicketRows },
       ] =
         await Promise.all([
           safeSupabaseQuery(supabase.from('properties').select('*').order('created_at')),
@@ -821,6 +823,7 @@ export default function App() {
           safeSupabaseQuery(supabase.from('license_history').select('*').order('created_at', { ascending: false })),
           safeSupabaseQuery(supabase.from('payment_settings').select('*').order('created_at')),
           safeSupabaseQuery(supabase.from('suggestions').select('*').order('created_at', { ascending: false })),
+          safeSupabaseQuery(supabase.from('support_tickets').select('*').order('created_at', { ascending: false })),
         ]);
 
       if (propertyRows?.length) {
@@ -839,6 +842,7 @@ export default function App() {
       if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
       if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
       if (suggestionRows?.length) setSuggestions(suggestionRows);
+      if (supportTicketRows?.length) setSupportTickets(supportTicketRows);
     } catch {
       // Keep the public page visible even when optional admin data cannot be loaded.
     } finally {
@@ -982,6 +986,11 @@ export default function App() {
 
   useEffect(() => {
     if (hasSupabaseConfig) return;
+    writeLocalData('supportTickets', supportTickets);
+  }, [supportTickets]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
     writeLocalData('adminLogs', adminLogs);
   }, [adminLogs]);
 
@@ -1014,6 +1023,37 @@ export default function App() {
     writeLocalData('themeMode', themeMode);
     document.documentElement.classList.toggle('dark', themeMode === 'dark');
   }, [themeMode]);
+
+  useEffect(() => {
+    const origin = typeof window === 'undefined' ? 'https://hospedex.com.br' : window.location.origin;
+    const image = getPrimaryPhoto(property, photos)?.url || placeholderPhoto.url;
+    if (route === '/') {
+      updateSeo({
+        title: 'Hospedex | Plataforma de hospedagens premium',
+        description: 'Encontre hospedagens e gerencie propriedades com reservas online, financeiro, licenças e painel administrativo.',
+        image,
+        url: origin,
+      });
+      return;
+    }
+    if (route === '/casas') {
+      updateSeo({
+        title: 'Casas cadastradas | Hospedex',
+        description: 'Lista de casas cadastradas no Hospedex com busca por nome, cidade e quantidade de hóspedes.',
+        image,
+        url: `${origin}/casas`,
+      });
+      return;
+    }
+    if (routeSlug && property?.id !== 'empty-property') {
+      updateSeo({
+        title: `${property.name} | Hospedex`,
+        description: property.headline || property.description || `Reserve ${property.name} pelo Hospedex.`,
+        image,
+        url: `${origin}${propertyPath(property)}`,
+      });
+    }
+  }, [route, routeSlug, property, photos]);
 
   useEffect(() => {
     if (!authChecked) return;
@@ -1574,6 +1614,7 @@ export default function App() {
         setProfiles={setProfiles}
         setProperties={setProperties}
         authProfile={authProfile}
+        supportTickets={supportTickets}
         onSignOut={signOut}
         onHome={() => navigateTo('/')}
         onRefresh={loadSupabaseData}
@@ -2171,6 +2212,27 @@ export default function App() {
   );
 }
 
+function upsertMetaTag(selector, attributes) {
+  if (typeof document === 'undefined') return;
+  let element = document.head.querySelector(selector);
+  if (!element) {
+    element = document.createElement('meta');
+    document.head.appendChild(element);
+  }
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+}
+
+function updateSeo({ title, description, image, url }) {
+  if (typeof document === 'undefined') return;
+  document.title = title;
+  upsertMetaTag('meta[name="description"]', { name: 'description', content: description });
+  upsertMetaTag('meta[property="og:title"]', { property: 'og:title', content: title });
+  upsertMetaTag('meta[property="og:description"]', { property: 'og:description', content: description });
+  upsertMetaTag('meta[property="og:type"]', { property: 'og:type', content: 'website' });
+  upsertMetaTag('meta[property="og:url"]', { property: 'og:url', content: url });
+  if (image) upsertMetaTag('meta[property="og:image"]', { property: 'og:image', content: image });
+}
+
 function PublicTopBar({ authProfile, onNavigate, transparent = false }) {
   const [open, setOpen] = useState(false);
   const role = normalizeRole(authProfile?.role);
@@ -2493,6 +2555,7 @@ function SuperAdminDashboard({
   setProfiles,
   setProperties,
   authProfile,
+  supportTickets,
   onSignOut,
   onHome,
   onRefresh,
@@ -2549,6 +2612,7 @@ function SuperAdminDashboard({
     ['reservations', 'Reservas', 'calendar_month'],
     ['financial', 'Financeiro', 'payments'],
     ['suggestions', 'Sugestões', 'forum'],
+    ['support', 'Suporte', 'support_agent'],
     ['settings', 'Configurações', 'settings'],
   ];
 
@@ -2678,6 +2742,7 @@ function SuperAdminDashboard({
   }
 
   async function deleteLicense(licenseId) {
+    if (!window.confirm('Tem certeza que deseja excluir esta licença?')) return;
     const deletedLicense = licenses.find((license) => license.id === licenseId);
     setLicenses((current) => current.filter((license) => license.id !== licenseId));
     if (deletedLicense?.property_id) {
@@ -2782,6 +2847,9 @@ function SuperAdminDashboard({
           ) : null}
           {view === 'suggestions' ? (
             <SuperTable title="Sugestões" rows={suggestions || []} columns={['created_at', 'name', 'email', 'message', 'status']} />
+          ) : null}
+          {view === 'support' ? (
+            <SuperTable title="Tickets de suporte" rows={supportTickets || []} columns={['created_at', 'name', 'user_email', 'subject', 'category', 'message', 'status']} />
           ) : null}
           {view === 'licenses' ? (
             <div className="grid gap-5">

@@ -6,3 +6,4 @@ dist
 *.log
 site-preview.png
 .vercel
+supabase/.temp
