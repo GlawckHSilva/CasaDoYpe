@@ -16,6 +16,7 @@ import {
   FileText,
   Home,
   ImagePlus,
+  Instagram,
   LifeBuoy,
   Lock,
   LogOut,
@@ -32,6 +33,7 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  Twitter,
   User,
   UserPlus,
   Users,
@@ -77,7 +79,14 @@ const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
 const canUsePasswordAdmin = Boolean(adminPassword);
 const fallbackOwnerWhatsapp = import.meta.env.VITE_OWNER_WHATSAPP || '43998108328';
 const fallbackOwnerEmail = import.meta.env.VITE_OWNER_EMAIL || adminEmail;
-const existingAccountMessage = 'Esse cadastro já existe. Use Login ou Recuperar senha para acessar.';
+const passwordRecoveryRedirect =
+  import.meta.env.VITE_PASSWORD_RECOVERY_REDIRECT || 'https://casa-do-ype.vercel.app/reset-password';
+const socialLinks = {
+  instagram: import.meta.env.VITE_SOCIAL_INSTAGRAM || 'https://www.instagram.com/hospedex',
+  email: `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(commercialEmail)}`,
+  twitter: import.meta.env.VITE_SOCIAL_X || 'https://x.com/hospedex',
+};
+const existingAccountMessage = 'Este email ja esta cadastrado.';
 const authRequestTimeoutMs = 8000;
 const profileRequestTimeoutMs = 3500;
 const paymentLabels = {
@@ -86,6 +95,14 @@ const paymentLabels = {
   transfer: 'Transferência',
   cash: 'Dinheiro',
   check: 'Cheque',
+};
+
+const paymentStatusLabels = {
+  pending: 'Pendente',
+  paid: 'Pago',
+  failed: 'Falhou',
+  refunded: 'Reembolsado',
+  not_required: 'Nao aplicavel',
 };
 
 const roleLabels = {
@@ -101,7 +118,43 @@ const licenseStatusLabels = {
   expired: 'Vencida',
   suspended: 'Suspensa',
   trial: 'Teste',
+  cancelled: 'Cancelada',
+  blocked: 'Bloqueada',
+  inactive: 'Inativa',
 };
+
+const planCards = [
+  {
+    id: 'mensal',
+    title: 'Mensal',
+    price: 89,
+    period: '/mes',
+    savings: 'Flexivel para comecar',
+    propertyLimit: 1,
+    highlighted: false,
+    benefits: ['1 propriedade ativa', 'Reservas online', 'Painel financeiro', 'Suporte essencial'],
+  },
+  {
+    id: 'semestral',
+    title: 'Semestral',
+    price: 449,
+    period: '/semestre',
+    savings: 'Economia de 15%',
+    propertyLimit: 3,
+    highlighted: true,
+    benefits: ['Ate 3 propriedades', 'Calendario e reservas', 'Financeiro completo', 'Prioridade no suporte'],
+  },
+  {
+    id: 'anual',
+    title: 'Anual',
+    price: 799,
+    period: '/ano',
+    savings: 'Economia de 25%',
+    propertyLimit: 8,
+    highlighted: false,
+    benefits: ['Ate 8 propriedades', 'Licencas centralizadas', 'Relatorios e caixa', 'Preparado para pagamentos'],
+  },
+];
 
 const defaultInterestRates = [
   { installments: 1, rate: 0 },
@@ -133,6 +186,7 @@ const emptyProperty = {
   owner_email: fallbackOwnerEmail,
   maps_url: '',
   theme_color: '#2563eb',
+  active: true,
   license_key: '',
   license_expires_at: '',
   license_active: true,
@@ -413,12 +467,67 @@ function buildMapsUrl(property) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(property.city)}`;
 }
 
+function getLicenseDaysUntilExpires(license) {
+  if (!license?.expires_at) return null;
+  const expiresAt = toDate(license.expires_at);
+  if (!expiresAt) return null;
+  return differenceInCalendarDays(expiresAt, new Date());
+}
+
+function isLicenseAccessValid(license) {
+  if (!license) return false;
+  const status = String(license.status || '').toLowerCase();
+  const daysUntilExpires = getLicenseDaysUntilExpires(license);
+  const startsAt = license.starts_at ? toDate(license.starts_at) : null;
+  const alreadyStarted = !startsAt || differenceInCalendarDays(startsAt, new Date()) <= 0;
+  return ['active', 'trial'].includes(status) && alreadyStarted && (daysUntilExpires === null || daysUntilExpires >= 0);
+}
+
+function compareLicenseRecency(a, b) {
+  return String(b?.expires_at || b?.updated_at || b?.created_at || '').localeCompare(
+    String(a?.expires_at || a?.updated_at || a?.created_at || ''),
+  );
+}
+
+function getLatestOwnerLicense(licenses, ownerId) {
+  if (!ownerId) return null;
+  const ownerLicenses = licenses.filter((license) => license.owner_id === ownerId);
+  const validLicense = ownerLicenses.filter(isLicenseAccessValid).sort(compareLicenseRecency)[0];
+  return validLicense || ownerLicenses.sort(compareLicenseRecency)[0] || null;
+}
+
+function getRelevantPropertyLicense(licenses, property) {
+  const directLicenses = licenses.filter((license) => license.property_id === property?.id);
+  const directValid = directLicenses.filter(isLicenseAccessValid).sort(compareLicenseRecency)[0];
+  if (directValid) return directValid;
+  const ownerLicense = getLatestOwnerLicense(licenses, property?.owner_id);
+  return ownerLicense || directLicenses.sort(compareLicenseRecency)[0] || null;
+}
+
 function isLicenseValid(property) {
+  if (property.active === false) return false;
   if (property.license_active === false) return false;
   if (!property.license_expires_at) return true;
   const expiresAt = toDate(property.license_expires_at);
   if (!expiresAt) return true;
   return !isBefore(addDays(expiresAt, 1), new Date());
+}
+
+function isPropertyPubliclyVisible(property, licenses = []) {
+  if (!property || property.id === 'empty-property' || property.active === false) return false;
+  const relevantLicense = getRelevantPropertyLicense(licenses, property);
+  if (relevantLicense) return isLicenseAccessValid(relevantLicense);
+  return isLicenseValid(property);
+}
+
+function buildLicenseWarningText(license) {
+  const days = getLicenseDaysUntilExpires(license);
+  if (days === null) return '';
+  if (days < 0) return 'Sua licenca esta vencida.';
+  if (days === 0) return 'Sua licenca vence hoje.';
+  if (days === 1) return 'Sua licenca vence amanha.';
+  if (days <= 7) return `Sua licenca vence em ${days} dias.`;
+  return '';
 }
 
 function fileToDataUrl(file) {
@@ -517,14 +626,14 @@ function generateLicenseKey(prefix = 'HOSPEDEX') {
 }
 
 function isLicenseExpired(license) {
-  if (!license?.expires_at) return false;
-  return isBefore(addDays(toDate(license.expires_at), 1), new Date());
+  const daysUntilExpires = getLicenseDaysUntilExpires(license);
+  return daysUntilExpires !== null && daysUntilExpires < 0;
 }
 
 function normalizeLicenseStatus(license) {
   if (!license) return 'expired';
-  if (license.status === 'suspended' || license.status === 'trial') return license.status;
-  return isLicenseExpired(license) ? 'expired' : license.status || 'active';
+  if (isLicenseExpired(license)) return 'expired';
+  return license.status || 'active';
 }
 
 function isAdminEmail(email) {
@@ -545,8 +654,7 @@ function isExistingAccountResponse(data) {
 }
 
 function getPasswordRecoveryRedirect() {
-  if (typeof window === 'undefined') return undefined;
-  return `${window.location.origin}/resetar-senha`;
+  return passwordRecoveryRedirect;
 }
 
 function isPasswordRecoveryUrl() {
@@ -554,6 +662,7 @@ function isPasswordRecoveryUrl() {
   const url = new URL(window.location.href);
   const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
   return (
+    url.pathname === '/reset-password' ||
     url.pathname === '/resetar-senha' ||
     url.searchParams.get('type') === 'recovery' ||
     url.searchParams.get('recovery') === '1' ||
@@ -639,6 +748,7 @@ export default function App() {
   const [cashMovements, setCashMovements] = useState(() => readLocalData('cashMovements', []));
   const [suggestions, setSuggestions] = useState(() => readLocalData('suggestions', []));
   const [supportTickets, setSupportTickets] = useState(() => readLocalData('supportTickets', []));
+  const [homeBanners, setHomeBanners] = useState(() => readLocalData('homeBanners', []));
   const [adminLogs, setAdminLogs] = useState(() => readLocalData('adminLogs', []));
   const [interestRates, setInterestRates] = useState(() => readLocalData('interestRates', defaultInterestRates));
   const [profiles, setProfiles] = useState(() => readLocalData('profiles', []));
@@ -656,6 +766,10 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(!hasSupabaseConfig);
   const [publicDataChecked, setPublicDataChecked] = useState(!hasSupabaseConfig);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authInitialMode, setAuthInitialMode] = useState('login');
+  const [adminInitialView, setAdminInitialView] = useState('dashboard');
+  const [clientPortalInitialView, setClientPortalInitialView] = useState('dashboard');
+  const [superAdminInitialView, setSuperAdminInitialView] = useState('dashboard');
   const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(() => isPasswordRecoveryUrl());
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(() => readLocalData('themeMode', 'light'));
@@ -676,15 +790,21 @@ export default function App() {
   });
 
   const routeSlug = route.match(/^\/casas\/([^/?#]+)/)?.[1] ? decodeURIComponent(route.match(/^\/casas\/([^/?#]+)/)?.[1]) : '';
+  const publicProperties = useMemo(
+    () => properties.filter((item) => isPropertyPubliclyVisible(item, licenses)),
+    [properties, licenses],
+  );
   const routeProperty = routeSlug
     ? properties.find((item) => item.slug === routeSlug || slugify(item.name) === routeSlug || item.id === routeSlug)
     : null;
-  const property = routeProperty || properties.find((item) => item.id === selectedPropertyId) || properties[0] || emptyPublicProperty;
+  const property =
+    routeProperty ||
+    properties.find((item) => item.id === selectedPropertyId) ||
+    publicProperties[0] ||
+    properties[0] ||
+    emptyPublicProperty;
   const propertyLicense = useMemo(
-    () =>
-      licenses.find((license) => license.property_id === property.id) ||
-      licenses.find((license) => license.owner_id && license.owner_id === property.owner_id) ||
-      null,
+    () => getRelevantPropertyLicense(licenses, property),
     [licenses, property.id, property.owner_id],
   );
   const propertyPaymentSettings = useMemo(
@@ -706,15 +826,17 @@ export default function App() {
     );
     return ownedProperties.length ? ownedProperties : [];
   }, [authProfile, properties]);
-  const adminProperty = adminProperties.find((item) => item.id === property.id) || adminProperties[0] || property;
+  const adminProperty =
+    adminProperties.find((item) => item.id === property.id) ||
+    adminProperties[0] ||
+    (authProfile
+      ? { ...emptyProperty, id: 'empty-owner-property', name: 'Nenhuma casa cadastrada', owner_id: authProfile.id, owner_email: authProfile.email }
+      : property);
   const adminPropertyPaymentSettings =
     paymentSettings.find((setting) => setting.property_id === adminProperty.id) ||
     paymentSettings.find((setting) => setting.owner_id && setting.owner_id === adminProperty.owner_id) ||
     null;
-  const adminPropertyLicense =
-    licenses.find((license) => license.property_id === adminProperty.id) ||
-    licenses.find((license) => license.owner_id && license.owner_id === adminProperty.owner_id) ||
-    null;
+  const adminPropertyLicense = getRelevantPropertyLicense(licenses, adminProperty);
   const propertyPhotos = useMemo(
     () => photos.filter((photo) => photo.property_id === property.id).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
     [photos, property.id],
@@ -791,6 +913,11 @@ export default function App() {
     Number(booking.guests) <= property.max_guests &&
     licenseValid;
   const propertyThemeStyle = useMemo(() => buildThemeStyle(property.theme_color), [property.theme_color]);
+  const canViewRouteProperty =
+    !routeProperty ||
+    isPropertyPubliclyVisible(routeProperty, licenses) ||
+    normalizeRole(authProfile?.role) === 'super_admin' ||
+    routeProperty.owner_id === authProfile?.id;
 
   async function loadSupabaseData() {
     if (!hasSupabaseConfig) {
@@ -811,6 +938,7 @@ export default function App() {
         { data: paymentSettingRows },
         { data: suggestionRows },
         { data: supportTicketRows },
+        { data: homeBannerRows },
       ] =
         await Promise.all([
           safeSupabaseQuery(supabase.from('properties').select('*').order('created_at')),
@@ -824,25 +952,27 @@ export default function App() {
           safeSupabaseQuery(supabase.from('payment_settings').select('*').order('created_at')),
           safeSupabaseQuery(supabase.from('suggestions').select('*').order('created_at', { ascending: false })),
           safeSupabaseQuery(supabase.from('support_tickets').select('*').order('created_at', { ascending: false })),
+          safeSupabaseQuery(supabase.from('home_banners').select('*').order('sort_order')),
         ]);
 
-      if (propertyRows?.length) {
+      if (Array.isArray(propertyRows)) {
         const normalizedProperties = propertyRows.map((item, index, rows) => ensurePropertySlug(item, rows));
         setProperties(normalizedProperties);
-        setSelectedPropertyId(propertyRows[0].id);
+        if (normalizedProperties.length) setSelectedPropertyId(normalizedProperties[0].id);
       }
-      if (photoRows?.length) setPhotos(photoRows);
-      if (reservationRows?.length) setReservations(reservationRows);
-      if (movementRows?.length) setCashMovements(movementRows);
+      if (Array.isArray(photoRows)) setPhotos(photoRows);
+      if (Array.isArray(reservationRows)) setReservations(reservationRows);
+      if (Array.isArray(movementRows)) setCashMovements(movementRows);
       if (interestRows?.length) {
         setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
       }
       if (!profileResult.error && Array.isArray(profileResult.data)) setProfiles(profileResult.data);
-      if (licenseRows?.length) setLicenses(licenseRows);
-      if (licenseHistoryRows?.length) setLicenseHistory(licenseHistoryRows);
-      if (paymentSettingRows?.length) setPaymentSettings(paymentSettingRows);
-      if (suggestionRows?.length) setSuggestions(suggestionRows);
-      if (supportTicketRows?.length) setSupportTickets(supportTicketRows);
+      if (Array.isArray(licenseRows)) setLicenses(licenseRows);
+      if (Array.isArray(licenseHistoryRows)) setLicenseHistory(licenseHistoryRows);
+      if (Array.isArray(paymentSettingRows)) setPaymentSettings(paymentSettingRows);
+      if (Array.isArray(suggestionRows)) setSuggestions(suggestionRows);
+      if (Array.isArray(supportTicketRows)) setSupportTickets(supportTicketRows);
+      if (Array.isArray(homeBannerRows)) setHomeBanners(homeBannerRows);
     } catch {
       // Keep the public page visible even when optional admin data cannot be loaded.
     } finally {
@@ -868,7 +998,7 @@ export default function App() {
     };
 
     if (hasSupabaseConfig) {
-      const { data } = await safeSupabaseQuery(
+      const { data, error } = await safeSupabaseQuery(
         supabase
           .from('profiles')
           .select('*')
@@ -880,12 +1010,12 @@ export default function App() {
 
       if (data) {
         profile = { ...profile, ...data, role: getAuthRole(data, session.user.email) };
-      } else {
+      } else if (!error) {
         void safeSupabaseQuery(
           supabase.from('profiles').upsert({
             id: session.user.id,
             email: session.user.email,
-            role: profile.role,
+            role: isSuperAdminEmail(session.user.email) ? 'super_admin' : 'hospede',
             full_name: profile.full_name,
             phone: profile.phone,
           }),
@@ -920,6 +1050,26 @@ export default function App() {
     setRoute(path);
   }
 
+  function openAuth(mode = 'login') {
+    setAuthInitialMode(mode);
+    navigateTo('/login');
+  }
+
+  function openAdminSection(view = 'dashboard') {
+    setAdminInitialView(view);
+    navigateTo('/admin');
+  }
+
+  function openClientSection(view = 'dashboard') {
+    setClientPortalInitialView(view);
+    navigateTo('/hospede');
+  }
+
+  function openSuperAdminSection(view = 'dashboard') {
+    setSuperAdminInitialView(view);
+    navigateTo('/super-admin');
+  }
+
   useEffect(() => {
     setSelectedPhoto(0);
     setMessage('');
@@ -945,7 +1095,7 @@ export default function App() {
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setPasswordRecoveryOpen(true);
-        navigateTo('/resetar-senha');
+        navigateTo('/reset-password');
       }
       const profile = await resolveAuthProfile(session);
       if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
@@ -988,6 +1138,11 @@ export default function App() {
     if (hasSupabaseConfig) return;
     writeLocalData('supportTickets', supportTickets);
   }, [supportTickets]);
+
+  useEffect(() => {
+    if (hasSupabaseConfig) return;
+    writeLocalData('homeBanners', homeBanners);
+  }, [homeBanners]);
 
   useEffect(() => {
     if (hasSupabaseConfig) return;
@@ -1042,6 +1197,24 @@ export default function App() {
         description: 'Lista de casas cadastradas no Hospedex com busca por nome, cidade e quantidade de hóspedes.',
         image,
         url: `${origin}/casas`,
+      });
+      return;
+    }
+    if (route === '/planos') {
+      updateSeo({
+        title: 'Planos | Hospedex',
+        description: 'Planos mensal, semestral e anual para proprietarios que querem publicar hospedagens no Hospedex.',
+        image,
+        url: `${origin}/planos`,
+      });
+      return;
+    }
+    if (route === '/sobre') {
+      updateSeo({
+        title: 'Sobre | Hospedex',
+        description: 'Conheca o Hospedex, a plataforma de hospedagens criada com React, Tailwind, Supabase e Vercel.',
+        image,
+        url: `${origin}/sobre`,
       });
       return;
     }
@@ -1220,7 +1393,13 @@ export default function App() {
 
     setProperties((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
     if (hasSupabaseConfig) {
-      await supabase.from('properties').update(normalized).eq('id', normalized.id);
+      let query = supabase.from('properties').update(normalized).eq('id', normalized.id);
+      if (normalizeRole(authProfile?.role) === 'proprietario') query = query.eq('owner_id', authProfile.id);
+      const { error } = await query;
+      if (error) {
+        setMessage('Nao foi possivel salvar a casa agora.');
+        return;
+      }
     }
     setMessage('Informações da casa atualizadas.');
   }
@@ -1235,7 +1414,7 @@ export default function App() {
       ...emptyProperty,
       ...propertyDraft,
       id: crypto.randomUUID(),
-      owner_id: propertyDraft.owner_id || (authProfile?.role === 'proprietario' ? authProfile.id : null),
+      owner_id: propertyDraft.owner_id || (normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : null),
       daily_rate: Number(propertyDraft.daily_rate || 0),
       cleaning_fee: Number(propertyDraft.cleaning_fee || 0),
       max_guests: Number(propertyDraft.max_guests || 1),
@@ -1244,6 +1423,7 @@ export default function App() {
       owner_whatsapp: propertyDraft.owner_whatsapp || fallbackOwnerWhatsapp,
       owner_email: propertyDraft.owner_email || fallbackOwnerEmail,
       maps_url: normalizeExternalUrl(propertyDraft.maps_url),
+      active: propertyDraft.active !== false,
       license_key: propertyDraft.license_key || '',
       license_expires_at: propertyDraft.license_expires_at || '',
       license_active: propertyDraft.license_active !== false,
@@ -1268,18 +1448,22 @@ export default function App() {
   }
 
   async function deleteProperty(propertyId) {
-    if (properties.length <= 1) {
-      setMessage('Mantenha pelo menos uma casa cadastrada.');
-      return;
-    }
+    if (typeof window !== 'undefined' && !window.confirm('Tem certeza que deseja excluir esta casa?')) return;
     const nextProperties = properties.filter((item) => item.id !== propertyId);
     setProperties(nextProperties);
     setPhotos((current) => current.filter((photo) => photo.property_id !== propertyId));
     setReservations((current) => current.filter((reservation) => reservation.property_id !== propertyId));
     setCashMovements((current) => current.filter((movement) => movement.property_id !== propertyId));
-    if (selectedPropertyId === propertyId) setSelectedPropertyId(nextProperties[0]?.id);
+    if (selectedPropertyId === propertyId) setSelectedPropertyId(nextProperties[0]?.id || '');
     if (hasSupabaseConfig) {
-      await supabase.from('properties').delete().eq('id', propertyId);
+      let query = supabase.from('properties').delete().eq('id', propertyId);
+      if (normalizeRole(authProfile?.role) === 'proprietario') query = query.eq('owner_id', authProfile.id);
+      const { error } = await query;
+      if (error) {
+        setMessage('Nao foi possivel excluir a casa agora.');
+        await loadSupabaseData();
+        return;
+      }
     }
     await addAdminLog('property_deleted', { property_id: propertyId });
     setMessage('Casa excluída.');
@@ -1333,9 +1517,38 @@ export default function App() {
     }
   }
 
-  async function createManualReservation(reservationDraft) {
+  async function addCashMovement(movementDraft, targetPropertyId = property.id) {
+    const movement = {
+      property_id: targetPropertyId,
+      reservation_id: movementDraft.reservation_id || null,
+      type: movementDraft.type || 'income',
+      status: movementDraft.status || 'expected',
+      payment_method: movementDraft.payment_method || 'cash',
+      amount: Number(movementDraft.amount || 0),
+      due_date: movementDraft.due_date || format(new Date(), 'yyyy-MM-dd'),
+      paid_at: movementDraft.status === 'received' ? movementDraft.paid_at || new Date().toISOString() : null,
+      description: movementDraft.description || '',
+    };
+    const localMovement = { ...movement, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+    setCashMovements((current) => [localMovement, ...current]);
+    if (hasSupabaseConfig) {
+      const { data, error } = await supabase.from('cash_movements').insert(movement).select().maybeSingle();
+      if (error) {
+        setCashMovements((current) => current.filter((item) => item.id !== localMovement.id));
+        setMessage('Nao foi possivel salvar a movimentacao financeira agora.');
+        return null;
+      }
+      if (data) {
+        setCashMovements((current) => current.map((item) => (item.id === localMovement.id ? data : item)));
+        return data;
+      }
+    }
+    return localMovement;
+  }
+
+  async function createManualReservation(reservationDraft, targetProperty = property) {
     const reservation = {
-      property_id: property.id,
+      property_id: targetProperty.id,
       guest_name: reservationDraft.guest_name || 'Reserva manual',
       guest_email: reservationDraft.guest_email || adminEmail,
       guest_phone: reservationDraft.guest_phone || '',
@@ -1350,7 +1563,8 @@ export default function App() {
       notes: reservationDraft.notes || '',
       source: 'manual',
     };
-    if (hasConflict(propertyReservations, reservation.check_in, reservation.check_out)) {
+    const targetReservations = reservations.filter((item) => item.property_id === targetProperty.id);
+    if (hasConflict(targetReservations, reservation.check_in, reservation.check_out)) {
       setMessage('Não foi possível criar: as datas conflitam com outra reserva ou bloqueio.');
       return false;
     }
@@ -1364,6 +1578,20 @@ export default function App() {
       created = data;
     }
     setReservations((current) => [...current, created]);
+    if (Number(created.total_amount || 0) > 0 && !['blocked', 'maintenance'].includes(created.status)) {
+      await addCashMovement(
+        {
+          reservation_id: created.id,
+          type: 'income',
+          status: created.payment_status === 'paid' ? 'received' : 'expected',
+          payment_method: created.payment_method || 'cash',
+          amount: created.total_amount,
+          due_date: created.check_in || format(new Date(), 'yyyy-MM-dd'),
+          description: `Reserva manual - ${created.guest_name}`,
+        },
+        targetProperty.id,
+      );
+    }
     await addAdminLog('manual_reservation_created', { reservation_id: created.id, status: created.status });
     setMessage('Reserva manual criada e calendário atualizado.');
     return true;
@@ -1441,6 +1669,10 @@ export default function App() {
   }
 
   async function saveInterestRates(nextRates) {
+    if (normalizeRole(authProfile?.role) !== 'super_admin') {
+      setMessage('Somente o Super Admin pode alterar juros.');
+      return;
+    }
     const normalizedRates = nextRates.map((item) => ({
       installments: Number(item.installments),
       rate: Number(item.rate || 0),
@@ -1529,12 +1761,8 @@ export default function App() {
           propertyName: property.name,
         },
       });
-      if (emailError) throw emailError;
+      if (emailError) console.warn('Suggestion email notification failed:', emailError.message || emailError);
     }
-    const emailUrl = `registro:${encodeURIComponent(commercialEmail)}?subject=${encodeURIComponent(
-      `Sugestão para ${property.name}`,
-    )}&body=${encodeURIComponent(`${payload.name || ''}\n${payload.user_email}\n\n${payload.message}`)}`;
-    void emailUrl;
     setMessage('Sugestão enviada. Obrigado por ajudar a melhorar o site.');
   }
 
@@ -1551,6 +1779,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
         <AuthModal
+          initialMode={authInitialMode}
           onClose={() => navigateTo('/')}
           onAuthenticated={(profile) => {
             setAuthProfile(profile);
@@ -1573,7 +1802,7 @@ export default function App() {
     );
   }
 
-  if (route === '/resetar-senha') {
+  if (route === '/reset-password' || route === '/resetar-senha') {
     return (
       <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
         <PasswordRecoveryModal
@@ -1619,6 +1848,9 @@ export default function App() {
         onHome={() => navigateTo('/')}
         onRefresh={loadSupabaseData}
         addAdminLog={addAdminLog}
+        homeBanners={homeBanners}
+        setHomeBanners={setHomeBanners}
+        initialView={superAdminInitialView}
       />
     );
   }
@@ -1629,8 +1861,14 @@ export default function App() {
         authProfile={authProfile}
         dataChecked={publicDataChecked}
         photos={photos}
-        properties={properties}
+        properties={publicProperties}
+        homeBanners={homeBanners}
         onNavigate={navigateTo}
+        onAuth={openAuth}
+        onOpenAdmin={openAdminSection}
+        onOpenClient={openClientSection}
+        onOpenSuperAdmin={openSuperAdminSection}
+        onSignOut={signOut}
       />
     );
   }
@@ -1641,13 +1879,46 @@ export default function App() {
         authProfile={authProfile}
         dataChecked={publicDataChecked}
         photos={photos}
-        properties={properties}
+        properties={publicProperties}
         onNavigate={navigateTo}
+        onAuth={openAuth}
+        onOpenAdmin={openAdminSection}
+        onOpenClient={openClientSection}
+        onOpenSuperAdmin={openSuperAdminSection}
+        onSignOut={signOut}
       />
     );
   }
 
-  if (routeSlug && publicDataChecked && !routeProperty) {
+  if (route === '/planos') {
+    return (
+      <PlansPage
+        authProfile={authProfile}
+        onNavigate={navigateTo}
+        onAuth={openAuth}
+        onOpenAdmin={openAdminSection}
+        onOpenClient={openClientSection}
+        onOpenSuperAdmin={openSuperAdminSection}
+        onSignOut={signOut}
+      />
+    );
+  }
+
+  if (route === '/sobre') {
+    return (
+      <AboutPage
+        authProfile={authProfile}
+        onNavigate={navigateTo}
+        onAuth={openAuth}
+        onOpenAdmin={openAdminSection}
+        onOpenClient={openClientSection}
+        onOpenSuperAdmin={openSuperAdminSection}
+        onSignOut={signOut}
+      />
+    );
+  }
+
+  if (routeSlug && publicDataChecked && (!routeProperty || !canViewRouteProperty)) {
     return (
       <AccessDenied
         title="Hospedagem não encontrada"
@@ -1690,28 +1961,25 @@ export default function App() {
             >
               {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </Button>
-            {normalizeRole(authProfile?.role) === 'hospede' ? (
-              <Button variant="outline" onClick={() => navigateTo('/hospede')}>
-                <MaterialIcon name="account_circle" size={18} />
-                Portal
+            {authProfile ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (normalizeRole(authProfile.role) === 'super_admin') openSuperAdminSection('dashboard');
+                  else if (normalizeRole(authProfile.role) === 'proprietario' || adminUnlocked) openAdminSection('dashboard');
+                  else openClientSection('reservations');
+                }}
+                aria-label="Abrir menu do usuario"
+                className="px-3"
+              >
+                <User size={18} />
               </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (normalizeRole(authProfile?.role) === 'super_admin') {
-                  navigateTo('/super-admin');
-                } else if (normalizeRole(authProfile?.role) === 'proprietario' || adminUnlocked) {
-                  navigateTo('/admin');
-                } else {
-                  navigateTo('/login');
-                }
-              }}
-              aria-label="Abrir administracao"
-              className="px-3"
-            >
-              <MaterialIcon name="person" size={18} />
-            </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => openAuth('login')}>Login</Button>
+                <Button onClick={() => openAuth('signup')}>Cadastrar</Button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -2101,7 +2369,7 @@ export default function App() {
               </span>
               <h2 className="mt-4 text-3xl font-black text-ink dark:text-white">Ajude a melhorar sua experiência</h2>
               <p className="mt-3 max-w-2xl text-ink/70 dark:text-white/70">
-                Envie ideias, ajustes ou melhorias. A sugestão fica registrada no sistema e abre um e-mail para o comercial.
+                Envie ideias, ajustes ou melhorias. A sugestao fica registrada no sistema para acompanhamento.
               </p>
             </div>
             <SuggestionForm authProfile={authProfile} onSubmit={submitSuggestion} />
@@ -2172,11 +2440,13 @@ export default function App() {
           savePaymentSettings={savePaymentSettings}
           updateReservationDetails={updateReservationDetails}
           updateReservationStatus={updateReservationStatus}
+          initialView={adminInitialView}
         />
       ) : null}
 
       {authOpen ? (
         <AuthModal
+          initialMode={authInitialMode}
           onClose={() => setAuthOpen(false)}
           onAuthenticated={(profile) => {
             setAuthProfile(profile);
@@ -2205,6 +2475,7 @@ export default function App() {
           )}
           onClose={() => setClientPortalOpen(false)}
           onSignOut={signOut}
+          initialView={clientPortalInitialView}
         />
       ) : null}
 
@@ -2233,30 +2504,67 @@ function updateSeo({ title, description, image, url }) {
   if (image) upsertMetaTag('meta[property="og:image"]', { property: 'og:image', content: image });
 }
 
-function PublicTopBar({ authProfile, onNavigate, transparent = false }) {
+function PublicTopBar({
+  authProfile,
+  onNavigate,
+  onAuth,
+  onOpenAdmin,
+  onOpenClient,
+  onOpenSuperAdmin,
+  onSignOut,
+  transparent = false,
+}) {
   const [open, setOpen] = useState(false);
   const role = normalizeRole(authProfile?.role);
+  const linkClass = `transition ${transparent ? 'hover:text-white' : 'hover:text-leaf'}`;
   const menuItems =
     role === 'super_admin'
-      ? [['/super-admin', 'Painel global']]
+      ? [
+          ['Painel super admin', () => onOpenSuperAdmin?.('dashboard')],
+          ['Usuários', () => onOpenSuperAdmin?.('users')],
+          ['Licenças', () => onOpenSuperAdmin?.('licenses')],
+          ['Sugestões', () => onOpenSuperAdmin?.('suggestions')],
+          ['Logs', () => onOpenSuperAdmin?.('settings')],
+          ['Banners/Home', () => onOpenSuperAdmin?.('banners')],
+        ]
       : role === 'proprietario'
-        ? [['/admin', 'Painel proprietário']]
+        ? [
+            ['Meu perfil', () => onOpenAdmin?.('admin')],
+            ['Minhas propriedades', () => onOpenAdmin?.('houses')],
+            ['Reservas', () => onOpenAdmin?.('reservations')],
+            ['Financeiro', () => onOpenAdmin?.('cash')],
+            ['Copiar links', () => onOpenAdmin?.('houses')],
+          ]
         : role === 'hospede'
-          ? [['/hospede', 'Minhas reservas']]
+          ? [
+              ['Meu perfil', () => onOpenClient?.('profile')],
+              ['Minhas reservas', () => onOpenClient?.('reservations')],
+              ['Suporte', () => onOpenClient?.('support')],
+            ]
           : [];
 
   return (
     <header className={`sticky top-0 z-30 border-b backdrop-blur ${transparent ? 'border-white/15 bg-ink/70 text-white' : 'border-ink/10 bg-white/95 text-ink shadow-sm'}`}>
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <button type="button" className="flex items-center gap-3 font-black" onClick={() => onNavigate('/')}>
           <span className="grid h-10 w-10 place-items-center rounded-md bg-leaf text-white">
             <DoorOpen size={20} />
           </span>
           Hospedex
         </button>
-        <nav className="hidden items-center gap-6 text-sm font-bold md:flex">
-          <button type="button" onClick={() => onNavigate('/casas')}>Hospedagens</button>
-          <button type="button" onClick={() => onNavigate('/admin')}>Sou proprietário</button>
+        <nav className="hidden items-center gap-5 text-sm font-bold md:flex">
+          <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>Hospedagens</button>
+          <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>Planos</button>
+          <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>Sobre</button>
+          <a className={linkClass} href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram">
+            <Instagram size={18} />
+          </a>
+          <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer" aria-label="Email">
+            <Mail size={18} />
+          </a>
+          <a className={linkClass} href={socialLinks.twitter} target="_blank" rel="noreferrer" aria-label="Twitter X">
+            <Twitter size={18} />
+          </a>
         </nav>
         {authProfile ? (
           <div className="relative">
@@ -2274,21 +2582,37 @@ function PublicTopBar({ authProfile, onNavigate, transparent = false }) {
                   <p className="font-black">{authProfile.full_name || 'Usuário'}</p>
                   <p className="truncate text-xs text-ink/55">{authProfile.email}</p>
                 </div>
-                {menuItems.map(([path, label]) => (
-                  <button key={path} type="button" className="block w-full px-4 py-3 text-left text-sm font-bold hover:bg-mist" onClick={() => onNavigate(path)}>
+                {menuItems.map(([label, action]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="block w-full px-4 py-3 text-left text-sm font-bold hover:bg-mist"
+                    onClick={() => {
+                      action();
+                      setOpen(false);
+                    }}
+                  >
                     {label}
                   </button>
                 ))}
                 <button type="button" className="block w-full px-4 py-3 text-left text-sm font-bold hover:bg-mist" onClick={() => onNavigate('/casas')}>
                   Ver hospedagens
                 </button>
+                <button type="button" className="block w-full px-4 py-3 text-left text-sm font-bold text-red-700 hover:bg-red-50" onClick={onSignOut}>
+                  Sair
+                </button>
               </div>
             ) : null}
           </div>
         ) : (
-          <Button type="button" variant="outline" onClick={() => onNavigate('/login')}>
-            Login
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" onClick={() => onAuth?.('login') || onNavigate('/login')}>
+              Login
+            </Button>
+            <Button type="button" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
+              Cadastrar
+            </Button>
+          </div>
         )}
       </div>
     </header>
@@ -2370,12 +2694,29 @@ function filterProperties(properties, query, city, guests) {
   });
 }
 
-function MarketingHome({ authProfile, dataChecked, photos, properties, onNavigate }) {
+function MarketingHome({
+  authProfile,
+  dataChecked,
+  photos,
+  properties,
+  homeBanners = [],
+  onNavigate,
+  onAuth,
+  onOpenAdmin,
+  onOpenClient,
+  onOpenSuperAdmin,
+  onSignOut,
+}) {
   const [query, setQuery] = useState('');
   const [city, setCity] = useState('');
   const [guests, setGuests] = useState('');
   const filtered = filterProperties(properties, query, city, guests).slice(0, 6);
-  const heroPhoto = getPrimaryPhoto(properties[0], photos) || placeholderPhoto;
+  const primaryBanner =
+    homeBanners.find((banner) => banner.active !== false && banner.is_primary) ||
+    homeBanners.find((banner) => banner.active !== false);
+  const heroPhoto = primaryBanner
+    ? { url: primaryBanner.image_url, alt: primaryBanner.title || 'Hospedex' }
+    : getPrimaryPhoto(properties[0], photos) || placeholderPhoto;
   const mockups = [
     ['Tela hóspede', User, 'Busca, calendário e solicitação de reserva'],
     ['Tela proprietário', Home, 'Casas, fotos, reservas e caixa'],
@@ -2387,7 +2728,15 @@ function MarketingHome({ authProfile, dataChecked, photos, properties, onNavigat
 
   return (
     <div className="min-h-screen bg-[#f4f8ff] text-ink">
-      <PublicTopBar authProfile={authProfile} onNavigate={onNavigate} />
+      <PublicTopBar
+        authProfile={authProfile}
+        onNavigate={onNavigate}
+        onAuth={onAuth}
+        onOpenAdmin={onOpenAdmin}
+        onOpenClient={onOpenClient}
+        onOpenSuperAdmin={onOpenSuperAdmin}
+        onSignOut={onSignOut}
+      />
       <main>
         <section className="relative overflow-hidden bg-ink text-white">
           <img className="absolute inset-0 h-full w-full object-cover opacity-45" src={heroPhoto.url} alt={heroPhoto.alt || 'Hospedagem'} />
@@ -2400,7 +2749,6 @@ function MarketingHome({ authProfile, dataChecked, photos, properties, onNavigat
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
                 <Button type="button" onClick={() => onNavigate('/casas')}>Ver hospedagens</Button>
-                <Button type="button" variant="ghost" onClick={() => onNavigate('/admin')}>Sou proprietário</Button>
               </div>
             </div>
             <div className="max-w-5xl">
@@ -2474,7 +2822,18 @@ function MarketingHome({ authProfile, dataChecked, photos, properties, onNavigat
   );
 }
 
-function HousesListingPage({ authProfile, dataChecked, photos, properties, onNavigate }) {
+function HousesListingPage({
+  authProfile,
+  dataChecked,
+  photos,
+  properties,
+  onNavigate,
+  onAuth,
+  onOpenAdmin,
+  onOpenClient,
+  onOpenSuperAdmin,
+  onSignOut,
+}) {
   const [query, setQuery] = useState('');
   const [city, setCity] = useState('');
   const [guests, setGuests] = useState('');
@@ -2482,7 +2841,15 @@ function HousesListingPage({ authProfile, dataChecked, photos, properties, onNav
 
   return (
     <div className="min-h-screen bg-[#f4f8ff] text-ink">
-      <PublicTopBar authProfile={authProfile} onNavigate={onNavigate} />
+      <PublicTopBar
+        authProfile={authProfile}
+        onNavigate={onNavigate}
+        onAuth={onAuth}
+        onOpenAdmin={onOpenAdmin}
+        onOpenClient={onOpenClient}
+        onOpenSuperAdmin={onOpenSuperAdmin}
+        onSignOut={onSignOut}
+      />
       <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="mb-6">
           <h1 className="text-4xl font-black">Casas cadastradas</h1>
@@ -2502,6 +2869,140 @@ function HousesListingPage({ authProfile, dataChecked, photos, properties, onNav
             <EmptyState title="Nenhuma hospedagem encontrada" text="Não há casas reais cadastradas para esses filtros." />
           )}
         </div>
+      </main>
+    </div>
+  );
+}
+
+function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut }) {
+  return (
+    <div className="min-h-screen bg-[#f4f8ff] text-ink">
+      <PublicTopBar
+        authProfile={authProfile}
+        onNavigate={onNavigate}
+        onAuth={onAuth}
+        onOpenAdmin={onOpenAdmin}
+        onOpenClient={onOpenClient}
+        onOpenSuperAdmin={onOpenSuperAdmin}
+        onSignOut={onSignOut}
+      />
+      <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div className="max-w-3xl">
+          <p className="text-sm font-black uppercase tracking-wide text-leaf">Planos Hospedex</p>
+          <h1 className="mt-3 text-4xl font-black sm:text-5xl">Escolha o plano para publicar suas hospedagens</h1>
+          <p className="mt-4 text-lg leading-8 text-ink/65">
+            Estrutura pronta para integrar pagamentos recorrentes depois, mantendo licencas, propriedades e financeiro separados.
+          </p>
+        </div>
+        <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          {planCards.map((plan) => (
+            <article
+              key={plan.id}
+              className={`grid gap-5 rounded-md bg-white p-6 shadow-sm ring-1 ${
+                plan.highlighted ? 'ring-leaf shadow-soft' : 'ring-ink/10'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-black">{plan.title}</h2>
+                  <p className="mt-1 text-sm font-bold text-leaf">{plan.savings}</p>
+                </div>
+                {plan.highlighted ? <span className="rounded-md bg-leaf px-3 py-1 text-xs font-black text-white">Destaque</span> : null}
+              </div>
+              <div>
+                <strong className="text-4xl font-black">{currency.format(plan.price)}</strong>
+                <span className="ml-1 text-sm font-bold text-ink/55">{plan.period}</span>
+              </div>
+              <p className="rounded-md bg-[#f4f8ff] px-3 py-2 text-sm font-bold">
+                {plan.propertyLimit} propriedade(s) permitida(s)
+              </p>
+              <div className="grid gap-2">
+                {plan.benefits.map((benefit) => (
+                  <p key={benefit} className="flex items-center gap-2 text-sm font-semibold text-ink/70">
+                    <Check size={16} className="text-leaf" />
+                    {benefit}
+                  </p>
+                ))}
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                <Button type="button" onClick={() => onAuth?.('signup')}>
+                  Contratar plano
+                </Button>
+                <Button type="button" variant="outline" onClick={() => onAuth?.('signup')}>
+                  Comecar agora
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function AboutPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut }) {
+  const techs = ['React/Vite', 'Tailwind', 'Supabase', 'Vercel'];
+  return (
+    <div className="min-h-screen bg-[#f4f8ff] text-ink">
+      <PublicTopBar
+        authProfile={authProfile}
+        onNavigate={onNavigate}
+        onAuth={onAuth}
+        onOpenAdmin={onOpenAdmin}
+        onOpenClient={onOpenClient}
+        onOpenSuperAdmin={onOpenSuperAdmin}
+        onSignOut={onSignOut}
+      />
+      <main className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
+        <section className="grid gap-6">
+          <div>
+            <p className="text-sm font-black uppercase tracking-wide text-leaf">Sobre o Hospedex</p>
+            <h1 className="mt-3 text-4xl font-black sm:text-5xl">Uma plataforma para hospedagens reais, gestao simples e controle seguro</h1>
+            <p className="mt-5 text-lg leading-8 text-ink/65">
+              O Hospedex conecta hospedes a casas cadastradas e entrega ao proprietario um painel para reservas, calendario,
+              financeiro, licencas e propriedades. O objetivo e reduzir improvisos e manter cada perfil com permissoes claras.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {['Reservas com historico', 'Isolamento por proprietario', 'Licencas preservando dados', 'Financeiro com caixa'].map((item) => (
+              <div key={item} className="rounded-md bg-white p-4 shadow-sm ring-1 ring-ink/10">
+                <Check className="text-leaf" size={18} />
+                <p className="mt-3 font-black">{item}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+        <aside className="grid gap-5">
+          <div className="rounded-md bg-white p-5 shadow-sm ring-1 ring-ink/10">
+            <h2 className="text-xl font-black">Desenvolvedor</h2>
+            <p className="mt-2 text-sm leading-6 text-ink/65">Glawck H. Silva</p>
+          </div>
+          <div className="rounded-md bg-white p-5 shadow-sm ring-1 ring-ink/10">
+            <h2 className="text-xl font-black">Tecnologias</h2>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {techs.map((tech) => (
+                <span key={tech} className="rounded-md bg-[#f4f8ff] px-3 py-2 text-sm font-black">
+                  {tech}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-md bg-white p-5 shadow-sm ring-1 ring-ink/10">
+            <h2 className="text-xl font-black">Contato</h2>
+            <p className="mt-2 text-sm font-semibold text-ink/65">{commercialEmail}</p>
+            <div className="mt-4 flex gap-2">
+              <a className="grid h-11 w-11 place-items-center rounded-md bg-[#f4f8ff] text-ink hover:text-leaf" href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram">
+                <Instagram size={18} />
+              </a>
+              <a className="grid h-11 w-11 place-items-center rounded-md bg-[#f4f8ff] text-ink hover:text-leaf" href={socialLinks.email} target="_blank" rel="noreferrer" aria-label="Email">
+                <Mail size={18} />
+              </a>
+              <a className="grid h-11 w-11 place-items-center rounded-md bg-[#f4f8ff] text-ink hover:text-leaf" href={socialLinks.twitter} target="_blank" rel="noreferrer" aria-label="Twitter X">
+                <Twitter size={18} />
+              </a>
+            </div>
+          </div>
+        </aside>
       </main>
     </div>
   );
@@ -2556,12 +3057,15 @@ function SuperAdminDashboard({
   setProperties,
   authProfile,
   supportTickets,
+  homeBanners = [],
+  setHomeBanners,
+  initialView = 'dashboard',
   onSignOut,
   onHome,
   onRefresh,
   addAdminLog,
 }) {
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState(initialView);
   const [query, setQuery] = useState('');
   const [licenseEdits, setLicenseEdits] = useState({});
   const [userNotice, setUserNotice] = useState('');
@@ -2572,11 +3076,24 @@ function SuperAdminDashboard({
     plan: 'mensal',
     status: 'trial',
     starts_at: format(new Date(), 'yyyy-MM-dd'),
-    expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+    expires_at: format(addDays(new Date(), 3), 'yyyy-MM-dd'),
     monthly_value: 0,
     property_limit: 1,
     notes: '',
   });
+  const [bannerDraft, setBannerDraft] = useState({
+    title: '',
+    subtitle: '',
+    image_url: '',
+    storage_path: '',
+    link_url: '',
+    active: true,
+    is_primary: false,
+  });
+
+  useEffect(() => {
+    setView(initialView || 'dashboard');
+  }, [initialView]);
 
   const owners = profiles.filter((profile) => normalizeRole(profile.role) === 'proprietario');
   const guests = profiles.filter((profile) => normalizeRole(profile.role) === 'hospede');
@@ -2613,6 +3130,7 @@ function SuperAdminDashboard({
     ['financial', 'Financeiro', 'payments'],
     ['suggestions', 'Sugestões', 'forum'],
     ['support', 'Suporte', 'support_agent'],
+    ['banners', 'Banners/Home', 'image'],
     ['settings', 'Configurações', 'settings'],
   ];
 
@@ -2702,6 +3220,81 @@ function SuperAdminDashboard({
     } finally {
       setRefreshing(false);
     }
+  }
+
+  async function handleBannerFile(event) {
+    const file = Array.from(event.target.files || []).find((item) => item.type.startsWith('image/'));
+    if (!file) return;
+    if (hasSupabaseConfig) {
+      const storagePath = `${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '-')}`;
+      const { error } = await supabase.storage.from('home-banners').upload(storagePath, file, {
+        cacheControl: '31536000',
+        upsert: false,
+      });
+      if (!error) {
+        const { data } = supabase.storage.from('home-banners').getPublicUrl(storagePath);
+        setBannerDraft((current) => ({ ...current, image_url: data.publicUrl, storage_path: storagePath }));
+        event.target.value = '';
+        return;
+      }
+    }
+    const url = await fileToDataUrl(file);
+    setBannerDraft((current) => ({ ...current, image_url: url, storage_path: '' }));
+    event.target.value = '';
+  }
+
+  async function saveBanner(event) {
+    event.preventDefault();
+    if (!bannerDraft.image_url.trim()) {
+      setUserNotice('Adicione uma imagem para salvar o banner.');
+      return;
+    }
+    const payload = {
+      ...bannerDraft,
+      sort_order: homeBanners.length + 1,
+      active: bannerDraft.active !== false,
+      is_primary: Boolean(bannerDraft.is_primary),
+    };
+    let saved = { ...payload, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+    if (hasSupabaseConfig) {
+      if (payload.is_primary) await supabase.from('home_banners').update({ is_primary: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      const { data, error } = await supabase.from('home_banners').insert(payload).select().maybeSingle();
+      if (error) {
+        setUserNotice(`Nao foi possivel salvar o banner: ${error.message || 'confira o Supabase.'}`);
+        return;
+      }
+      saved = data;
+    }
+    setHomeBanners?.((current) => {
+      const next = saved.is_primary ? current.map((item) => ({ ...item, is_primary: false })) : current;
+      return [...next, saved].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    });
+    setBannerDraft({ title: '', subtitle: '', image_url: '', storage_path: '', link_url: '', active: true, is_primary: false });
+    setUserNotice('Banner salvo.');
+    await addAdminLog('home_banner_saved', { banner_id: saved.id });
+  }
+
+  async function updateBanner(banner, updates) {
+    const nextBanner = { ...banner, ...updates };
+    setHomeBanners?.((current) =>
+      current.map((item) =>
+        item.id === banner.id ? nextBanner : updates.is_primary ? { ...item, is_primary: false } : item,
+      ),
+    );
+    if (hasSupabaseConfig) {
+      if (updates.is_primary) await supabase.from('home_banners').update({ is_primary: false }).neq('id', banner.id);
+      await supabase.from('home_banners').update(updates).eq('id', banner.id);
+    }
+  }
+
+  async function deleteBanner(banner) {
+    if (!window.confirm('Tem certeza que deseja remover este banner?')) return;
+    setHomeBanners?.((current) => current.filter((item) => item.id !== banner.id));
+    if (hasSupabaseConfig) {
+      if (banner.storage_path) await supabase.storage.from('home-banners').remove([banner.storage_path]);
+      await supabase.from('home_banners').delete().eq('id', banner.id);
+    }
+    await addAdminLog('home_banner_deleted', { banner_id: banner.id });
   }
 
   async function upsertLicense(payload) {
@@ -2851,6 +3444,80 @@ function SuperAdminDashboard({
           {view === 'support' ? (
             <SuperTable title="Tickets de suporte" rows={supportTickets || []} columns={['created_at', 'name', 'user_email', 'subject', 'category', 'message', 'status']} />
           ) : null}
+          {view === 'banners' ? (
+            <div className="grid gap-5">
+              <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={saveBanner}>
+                <div>
+                  <h2 className="text-xl font-black">Gerenciar banners/home</h2>
+                  <p className="mt-1 text-sm text-ink/65">Adicione imagens, defina o banner principal e controle a ordem visual da home.</p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Titulo">
+                    <TextInput value={bannerDraft.title} onChange={(event) => setBannerDraft({ ...bannerDraft, title: event.target.value })} />
+                  </Field>
+                  <Field label="Link opcional">
+                    <TextInput value={bannerDraft.link_url} onChange={(event) => setBannerDraft({ ...bannerDraft, link_url: event.target.value })} placeholder="https://..." />
+                  </Field>
+                </div>
+                <Field label="Subtitulo">
+                  <TextArea value={bannerDraft.subtitle} onChange={(event) => setBannerDraft({ ...bannerDraft, subtitle: event.target.value })} />
+                </Field>
+                <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                  <Field label="URL da imagem">
+                    <TextInput value={bannerDraft.image_url} onChange={(event) => setBannerDraft({ ...bannerDraft, image_url: event.target.value })} placeholder="https://..." />
+                  </Field>
+                  <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-ink/15 bg-white px-5 py-2.5 text-sm font-bold shadow-sm">
+                    <ImagePlus size={18} />
+                    Upload
+                    <input type="file" accept="image/*" className="hidden" onChange={handleBannerFile} />
+                  </label>
+                </div>
+                {bannerDraft.image_url ? (
+                  <img className="h-52 w-full rounded-md object-cover" src={bannerDraft.image_url} alt={bannerDraft.title || 'Banner'} />
+                ) : null}
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm font-bold">
+                    <input type="checkbox" checked={bannerDraft.active} onChange={(event) => setBannerDraft({ ...bannerDraft, active: event.target.checked })} />
+                    Ativo
+                  </label>
+                  <label className="flex items-center gap-2 text-sm font-bold">
+                    <input type="checkbox" checked={bannerDraft.is_primary} onChange={(event) => setBannerDraft({ ...bannerDraft, is_primary: event.target.checked })} />
+                    Banner principal
+                  </label>
+                </div>
+                <Button type="submit">
+                  <Save size={18} />
+                  Salvar banner
+                </Button>
+              </form>
+              <div className="grid gap-3">
+                {(homeBanners || []).map((banner) => (
+                  <div key={banner.id} className="grid gap-3 rounded-md bg-white p-4 shadow-sm lg:grid-cols-[180px_1fr_auto] lg:items-center">
+                    <img className="h-28 w-full rounded-md object-cover" src={banner.image_url} alt={banner.title || 'Banner'} />
+                    <div>
+                      <p className="font-black">{banner.title || 'Banner sem titulo'}</p>
+                      <p className="mt-1 text-sm text-ink/65">{banner.subtitle || 'Sem subtitulo'}</p>
+                      <p className="mt-2 text-xs font-bold uppercase tracking-wide text-ink/45">
+                        {banner.active ? 'Ativo' : 'Inativo'} {banner.is_primary ? ' - principal' : ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <Button type="button" variant="outline" className="px-3" onClick={() => updateBanner(banner, { is_primary: true, active: true })}>
+                        Principal
+                      </Button>
+                      <Button type="button" variant="outline" className="px-3" onClick={() => updateBanner(banner, { active: !banner.active })}>
+                        {banner.active ? 'Desativar' : 'Ativar'}
+                      </Button>
+                      <Button type="button" variant="outline" className="px-3" onClick={() => deleteBanner(banner)}>
+                        <Trash2 size={16} />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {!homeBanners?.length ? <EmptyState title="Nenhum banner cadastrado" text="Adicione a primeira imagem para a home." /> : null}
+              </div>
+            </div>
+          ) : null}
           {view === 'licenses' ? (
             <div className="grid gap-5">
               <form
@@ -2864,7 +3531,7 @@ function SuperAdminDashboard({
                     plan: 'mensal',
                     status: 'trial',
                     starts_at: format(new Date(), 'yyyy-MM-dd'),
-                    expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+                    expires_at: format(addDays(new Date(), 3), 'yyyy-MM-dd'),
                     monthly_value: 0,
                     property_limit: 1,
                     notes: '',
@@ -2901,6 +3568,9 @@ function SuperAdminDashboard({
                       <option value="active">Ativa</option>
                       <option value="expired">Vencida</option>
                       <option value="suspended">Suspensa</option>
+                      <option value="blocked">Bloqueada</option>
+                      <option value="cancelled">Cancelada</option>
+                      <option value="inactive">Inativa</option>
                       <option value="trial">Teste</option>
                     </SelectInput>
                   </Field>
@@ -2984,6 +3654,9 @@ function SuperAdminDashboard({
                             <option value="active">Ativa</option>
                             <option value="expired">Vencida</option>
                             <option value="suspended">Suspensa</option>
+                            <option value="blocked">Bloqueada</option>
+                            <option value="cancelled">Cancelada</option>
+                            <option value="inactive">Inativa</option>
                             <option value="trial">Teste</option>
                           </SelectInput>
                         </Field>
@@ -3237,8 +3910,8 @@ function SuperTable({ title, rows, columns }) {
   );
 }
 
-function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
-  const [mode, setMode] = useState('login');
+function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode = 'login' }) {
+  const [mode, setMode] = useState(initialMode);
   const [form, setForm] = useState({ email: '', password: '', full_name: '', phone: '' });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -3362,7 +4035,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
             email: form.email.trim(),
             full_name: form.full_name,
             phone: form.phone,
-            role: getAuthRole(null, form.email.trim()),
+            role: 'hospede',
           }),
           profileRequestTimeoutMs,
           'Cadastro criado, mas o perfil demorou para salvar.',
@@ -3393,13 +4066,13 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile }) {
       return;
     }
     if (signInError?.message === 'Email not confirmed') {
-      setError('E-mail ainda não confirmado no Supabase.');
-      setNotice('Verifique a caixa de entrada ou desative a confirmação de e-mail no Supabase Auth durante testes.');
+      setError('Confirme seu email antes de entrar.');
+      setNotice('Verifique sua caixa de entrada e tente novamente.');
       setSubmitting(false);
       return;
     }
     if (signInError || !data?.session) {
-      setError('Login não autorizado. Confira e-mail e senha.');
+      setError('Email ou senha incorretos.');
       setSubmitting(false);
       return;
     }
@@ -3644,12 +4317,12 @@ function PasswordRecoveryModal({ onClose }) {
   );
 }
 
-function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, voucherSummary, onClose, onSignOut }) {
+function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, voucherSummary, onClose, onSignOut, initialView = 'dashboard' }) {
   const clientReservations = reservations
     .filter((reservation) => reservation.guest_email === authProfile?.email)
     .sort((a, b) => String(b.created_at || b.check_in).localeCompare(String(a.created_at || a.check_in)));
   const currentReservation = clientReservations.find((reservation) => ['pending', 'confirmed'].includes(reservation.status));
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState(initialView);
   const [profileDraft, setProfileDraft] = useState({
     full_name: authProfile?.full_name || '',
     phone: authProfile?.phone || '',
@@ -3668,6 +4341,14 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
     ['profile', 'Dados pessoais', 'person'],
     ['status', 'Status atual', 'verified_user'],
   ];
+
+  useEffect(() => {
+    setMode(initialMode || 'login');
+  }, [initialMode]);
+
+  useEffect(() => {
+    setView(initialView || 'dashboard');
+  }, [initialView]);
 
   async function submitProfile(event) {
     event.preventDefault();
@@ -3696,27 +4377,6 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
       setSupportNotice('Suporte enviado com sucesso.');
     } catch {
       setSupportNotice('Não foi possível enviar agora. Tente novamente.');
-    }
-  }
-
-  async function addCashMovement(movementDraft) {
-    const movement = {
-      property_id: adminProperty.id,
-      type: movementDraft.type,
-      status: movementDraft.status,
-      payment_method: movementDraft.payment_method,
-      amount: Number(movementDraft.amount || 0),
-      due_date: movementDraft.due_date || format(new Date(), 'yyyy-MM-dd'),
-      paid_at: movementDraft.status === 'received' ? new Date().toISOString() : null,
-      description: movementDraft.description || '',
-    };
-    const localMovement = { ...movement, id: crypto.randomUUID(), created_at: new Date().toISOString() };
-    setCashMovements((current) => [localMovement, ...current]);
-    if (hasSupabaseConfig) {
-      const { data, error } = await supabase.from('cash_movements').insert(movement).select().maybeSingle();
-      if (!error && data) {
-        setCashMovements((current) => current.map((item) => (item.id === localMovement.id ? data : item)));
-      }
     }
   }
 
@@ -4216,6 +4876,7 @@ function AdminPanel({
   savePaymentSettings,
   updateReservationDetails,
   updateReservationStatus,
+  initialView = 'dashboard',
 }) {
   const [login, setLogin] = useState({ email: adminEmail, password: '' });
   const [loginError, setLoginError] = useState('');
@@ -4223,7 +4884,7 @@ function AdminPanel({
   const [expandedReservationId, setExpandedReservationId] = useState('');
   const [showNewProperty, setShowNewProperty] = useState(false);
   const [reportType, setReportType] = useState('summary');
-  const [adminView, setAdminView] = useState('dashboard');
+  const [adminView, setAdminView] = useState(initialView);
   const [adminNotice, setAdminNotice] = useState('');
   const [licenseNotice, setLicenseNotice] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
@@ -4340,6 +5001,10 @@ function AdminPanel({
     occupancy: 'Ocupação e desempenho',
     guests: 'Hóspedes',
   };
+
+  useEffect(() => {
+    setAdminView(initialView || 'dashboard');
+  }, [initialView]);
 
   useEffect(() => {
     setDraft({
@@ -4605,7 +5270,7 @@ function AdminPanel({
 
   async function submitManualReservation(event) {
     event.preventDefault();
-    const created = await createManualReservation(manualReservation);
+    const created = await createManualReservation(manualReservation, property);
     if (!created) return;
     setManualReservation({
       guest_name: '',
@@ -4623,7 +5288,7 @@ function AdminPanel({
 
   async function submitCashMovement(event) {
     event.preventDefault();
-    await addCashMovement(cashDraft);
+    await addCashMovement(cashDraft, property.id);
     setCashDraft({
       type: 'income',
       amount: '',
@@ -4960,7 +5625,21 @@ function AdminPanel({
   const ownerPanelBlocked =
     adminUnlocked &&
     normalizeRole(authProfile?.role) !== 'super_admin' &&
-    (!propertyLicense || ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense)));
+    (!propertyLicense || !isLicenseAccessValid(propertyLicense));
+  const licenseWarningText =
+    normalizeRole(authProfile?.role) === 'proprietario' && propertyLicense && isLicenseAccessValid(propertyLicense)
+      ? buildLicenseWarningText(propertyLicense)
+      : '';
+  const licenseWarningKey = propertyLicense
+    ? `license-warning:${propertyLicense.id || propertyLicense.license_key}:${propertyLicense.expires_at || ''}`
+    : '';
+  const [dismissedLicenseWarning, setDismissedLicenseWarning] = useState(() =>
+    licenseWarningKey ? readLocalData(licenseWarningKey, false) : false,
+  );
+
+  useEffect(() => {
+    setDismissedLicenseWarning(licenseWarningKey ? readLocalData(licenseWarningKey, false) : false);
+  }, [licenseWarningKey]);
 
   if (ownerPanelBlocked) {
     return (
@@ -4980,10 +5659,12 @@ function AdminPanel({
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-1 shrink-0" />
                 <div>
-                  <h3 className="text-2xl font-black">Licença {licenseStatusLabels[normalizeLicenseStatus(propertyLicense)]}</h3>
+                  <h3 className="text-2xl font-black">
+                    {propertyLicense ? `Licenca ${licenseStatusLabels[normalizeLicenseStatus(propertyLicense)]}` : 'Aguardando liberacao da licenca'}
+                  </h3>
                   <p className="mt-2 text-sm leading-6">
-                    O painel do proprietário está bloqueado até a regularização da licença. As reservas públicas também ficam pausadas
-                    quando a licença está vencida ou suspensa.
+                    O painel do proprietario esta bloqueado ate a regularizacao da licenca. Os dados continuam salvos e voltam a ficar
+                    disponiveis quando o Super Admin liberar uma licenca ativa.
                   </p>
                   <p className="mt-3 text-sm font-bold">Vencimento: {propertyLicense?.expires_at || '-'}</p>
                 </div>
@@ -5145,7 +5826,28 @@ function AdminPanel({
                 </Button>
               </div>
             ) : null}
-            {normalizeRole(authProfile?.role) !== 'super_admin' && propertyLicense && ['expired', 'suspended'].includes(normalizeLicenseStatus(propertyLicense)) ? (
+            {licenseWarningText && !dismissedLicenseWarning ? (
+              <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-1 shrink-0" />
+                  <div>
+                    <h3 className="font-black">Aviso de licenca</h3>
+                    <p className="mt-1 text-sm font-semibold">{licenseWarningText}</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setDismissedLicenseWarning(true);
+                    if (licenseWarningKey) writeLocalData(licenseWarningKey, true);
+                  }}
+                >
+                  Entendi
+                </Button>
+              </section>
+            ) : null}
+            {normalizeRole(authProfile?.role) !== 'super_admin' && propertyLicense && !isLicenseAccessValid(propertyLicense) ? (
               <section className="grid gap-3 rounded-md border border-red-200 bg-red-50 p-5 text-red-800 shadow-sm">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="mt-1 shrink-0" />
@@ -5242,7 +5944,6 @@ function AdminPanel({
                         variant="outline"
                         className="px-3"
                         onClick={() => deleteProperty(item.id)}
-                        disabled={properties.length <= 1}
                         aria-label={`Excluir ${item.name}`}
                       >
                         <Trash2 size={16} />
@@ -5250,6 +5951,16 @@ function AdminPanel({
                     </div>
                   </div>
                 ))}
+                {!properties.length ? (
+                  <div className="rounded-md border border-dashed border-ink/20 bg-[#f4f8ff] p-5 text-center">
+                    <p className="font-black">Nenhuma casa cadastrada</p>
+                    <p className="mt-2 text-sm text-ink/60">Adicione sua primeira casa quando a licenca estiver ativa.</p>
+                    <Button type="button" className="mt-4" onClick={startNewProperty}>
+                      <Plus size={18} />
+                      Adicionar casa
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -6106,6 +6817,7 @@ function AdminPanel({
                       <TextInput
                         type="number"
                         value={item.rate}
+                        disabled={!isOwnerAdmin}
                         onChange={(event) =>
                           setInterestRates((current) =>
                             current.map((rate, rateIndex) =>
@@ -6117,12 +6829,18 @@ function AdminPanel({
                     </Field>
                   ))}
                 </div>
-                <div className="flex justify-end">
-                  <Button type="button" onClick={() => saveInterestRates(interestRates)}>
-                    <Save size={18} />
-                    Salvar juros
-                  </Button>
-                </div>
+                {isOwnerAdmin ? (
+                  <div className="flex justify-end">
+                    <Button type="button" onClick={() => saveInterestRates(interestRates)}>
+                      <Save size={18} />
+                      Salvar juros
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="rounded-md bg-[#f4f8ff] p-3 text-sm font-semibold text-ink/65">
+                    Juros definidos pelo Super Admin. Proprietarios podem visualizar, mas nao alterar.
+                  </p>
+                )}
                 <form
                   className="grid gap-4 rounded-md bg-[#f4f8ff] p-4"
                   onSubmit={(event) => {
