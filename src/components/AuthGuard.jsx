@@ -1,3 +1,4 @@
+import React from 'react';
 import LoadingState from './LoadingState.jsx';
 
 export default function AuthGuard({ loading, authenticated, allowed = true, loadingLabel, unauthenticatedFallback, deniedFallback, children }) {
