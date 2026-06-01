@@ -823,7 +823,7 @@ function Button({ children, className = '', variant = 'primary', ...props }) {
 
   return (
     <button
-      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-bold transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60 ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-[13px] font-bold transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60 sm:min-h-11 sm:px-5 sm:py-2.5 sm:text-sm ${variants[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -833,7 +833,7 @@ function Button({ children, className = '', variant = 'primary', ...props }) {
 
 function Field({ label, children }) {
   return (
-    <label className="grid gap-2 text-sm font-semibold text-ink">
+    <label className="grid gap-1.5 text-[13px] font-semibold text-ink sm:gap-2 sm:text-sm">
       <span>{label}</span>
       {children}
     </label>
@@ -843,7 +843,7 @@ function Field({ label, children }) {
 function TextInput(props) {
   return (
     <input
-      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:text-sm"
+      className="min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-11 sm:text-sm"
       {...props}
     />
   );
@@ -852,7 +852,7 @@ function TextInput(props) {
 function TextArea(props) {
   return (
     <textarea
-      className="min-h-24 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:text-sm"
+      className="min-h-20 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-24 sm:text-sm"
       {...props}
     />
   );
@@ -861,7 +861,7 @@ function TextArea(props) {
 function SelectInput({ children, ...props }) {
   return (
     <select
-      className="min-h-11 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition sm:text-sm"
+      className="min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition sm:min-h-11 sm:text-sm"
       {...props}
     >
       {children}
@@ -1174,7 +1174,7 @@ export default function App() {
 
   function openAuth(mode = 'login') {
     setAuthInitialMode(mode);
-    navigateTo('/login');
+    navigateTo(mode === 'signup' ? '/login?mode=signup' : '/login');
   }
 
   function openAdminSection(view = 'dashboard') {
@@ -1191,6 +1191,14 @@ export default function App() {
     setSuperAdminInitialView(view);
     navigateTo('/super-admin');
   }
+
+  useEffect(() => {
+    if (route !== '/login') return;
+    const requestedMode = new URLSearchParams(location.search).get('mode');
+    if (requestedMode === 'signup' || requestedMode === 'login') {
+      setAuthInitialMode(requestedMode);
+    }
+  }, [location.search, route]);
 
   useEffect(() => {
     setSelectedPhoto(0);
@@ -3693,20 +3701,20 @@ function SuperAdminDashboard({
   return (
     <div className="min-h-screen bg-[#eef4ff] text-ink">
       <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
-        <aside className="border-r border-ink/10 bg-white p-4">
-          <div className="flex items-center gap-3 rounded-md bg-ink p-4 text-white">
-            <ShieldCheck size={28} />
+        <aside className="border-b border-ink/10 bg-white p-3 sm:p-4 lg:border-b-0 lg:border-r">
+          <div className="flex items-center gap-3 rounded-md bg-ink p-3 text-white sm:p-4">
+            <ShieldCheck size={24} className="sm:h-7 sm:w-7" />
             <div>
               <p className="font-black">Super Admin</p>
-              <p className="text-xs text-white/65">{authProfile?.email}</p>
+              <p className="max-w-[240px] truncate text-xs text-white/65">{authProfile?.email}</p>
             </div>
           </div>
-          <nav className="mt-5 grid gap-1">
+          <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:mt-5 lg:grid lg:overflow-visible lg:pb-0">
             {menu.map(([key, label, icon]) => (
               <button
                 key={key}
                 type="button"
-                className={`flex items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-black transition ${
+                className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 lg:py-3 ${
                   view === key ? 'bg-leaf text-white' : 'hover:bg-mist'
                 }`}
                 onClick={() => setView(key)}
@@ -3716,7 +3724,7 @@ function SuperAdminDashboard({
               </button>
             ))}
           </nav>
-          <div className="mt-5 grid gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-2 lg:mt-5 lg:grid-cols-1">
             <Button type="button" variant="outline" onClick={onHome}>
               Site
             </Button>
@@ -3725,11 +3733,11 @@ function SuperAdminDashboard({
             </Button>
           </div>
         </aside>
-        <main className="overflow-auto p-4 sm:p-6">
-          <header className="mb-6 flex flex-col gap-3 rounded-md bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <main className="overflow-auto p-3 sm:p-6">
+          <header className="mb-4 flex flex-col gap-3 rounded-md bg-white p-3 shadow-sm sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-wide text-ink/50">HospedeX</p>
-              <h1 className="text-2xl font-black">Gestão total do sistema</h1>
+              <h1 className="text-xl font-black sm:text-2xl">Gestão total do sistema</h1>
             </div>
             <div className="grid gap-2 sm:grid-cols-[auto_minmax(220px,320px)]">
               <Button type="button" variant="outline" onClick={refreshDashboardData} disabled={refreshing} className="min-h-11 px-4">
@@ -4185,15 +4193,15 @@ function SuperUsersTable({ title, rows, notice, onRoleChange, onDeleteUser }) {
                       key={nextRole}
                       type="button"
                       variant={role === nextRole ? 'secondary' : 'outline'}
-                      className="px-3"
+                      className="flex-1 px-2 sm:flex-none sm:px-3"
                       onClick={() => onRoleChange(profile, nextRole)}
                     >
                       {label}
                     </Button>
                   ))}
-                  <Button type="button" variant="outline" className="px-3" onClick={() => onDeleteUser(profile)}>
+                  <Button type="button" variant="outline" className="h-10 w-10 px-0 sm:w-auto sm:px-3" onClick={() => onDeleteUser(profile)}>
                     <Trash2 size={16} />
-                    Excluir
+                    <span className="sr-only sm:not-sr-only">Excluir</span>
                   </Button>
                 </div>
               </div>
@@ -4435,54 +4443,58 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/60 p-4 backdrop-blur">
-      <form className="brand-card grid w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft sm:max-w-lg sm:p-6" onSubmit={submit}>
-        <div className="flex justify-end">
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/60 p-2 py-3 backdrop-blur sm:p-4">
+      <form
+        className="brand-card flex max-h-[calc(100dvh-1rem)] w-[95vw] max-w-md flex-col overflow-hidden rounded-md bg-white text-ink shadow-soft sm:max-h-[90vh] sm:w-full sm:max-w-lg"
+        onSubmit={submit}
+      >
+        <div className="flex shrink-0 justify-end px-3 pt-3 sm:px-5 sm:pt-5">
           <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar login" className="min-h-9 px-3 py-1.5">
             <X size={16} />
           </Button>
         </div>
-        <div className="grid justify-items-center gap-2 text-center">
-          <BrandLogo variant="vertical" className="h-28 w-28 rounded-2xl shadow-sm" />
-          <h2 className="text-xl font-black">{mode === 'login' ? 'Login' : 'Cadastro'}</h2>
-          <p className="max-w-xs text-xs leading-5 text-ink/55">
-            {mode === 'login'
-              ? 'Entre para acessar o portal correto da sua conta.'
-              : 'Crie sua conta para acompanhar reservas e solicitações.'}
-          </p>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 rounded-md bg-mist p-1">
-          <button
-            type="button"
-            className={`rounded-md px-3 py-2.5 text-sm font-black ${mode === 'login' ? 'bg-white shadow-sm' : ''}`}
-            onClick={() => {
-              setMode('login');
-              setError('');
-              setNotice('');
-            }}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-3 py-2.5 text-sm font-black ${mode === 'signup' ? 'bg-white shadow-sm' : ''}`}
-            onClick={() => {
-              setMode('signup');
-              setError('');
-              setNotice('');
-            }}
-          >
-            Cadastro
-          </button>
-        </div>
-        {!hasSupabaseConfig ? (
-          <p className="mt-4 rounded-md bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-            {configNotice}
-          </p>
-        ) : null}
-        <div className="mt-4 grid gap-3.5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 sm:px-6 sm:pb-4">
+          <div className="grid justify-items-center gap-1.5 text-center sm:gap-2">
+            <BrandLogo variant="vertical" className="h-16 w-16 rounded-xl shadow-sm sm:h-24 sm:w-24 sm:rounded-2xl" />
+            <h2 className="text-lg font-black sm:text-xl">{mode === 'login' ? 'Login' : 'Cadastro'}</h2>
+            <p className="max-w-xs text-[11px] leading-5 text-ink/55 sm:text-xs">
+              {mode === 'login'
+                ? 'Entre para acessar o portal correto da sua conta.'
+                : 'Crie sua conta para acompanhar reservas e solicitações.'}
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-mist p-1 sm:mt-4">
+            <button
+              type="button"
+              className={`rounded-md px-3 py-2 text-sm font-black sm:py-2.5 ${mode === 'login' ? 'bg-white shadow-sm' : ''}`}
+              onClick={() => {
+                setMode('login');
+                setError('');
+                setNotice('');
+              }}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-3 py-2 text-sm font-black sm:py-2.5 ${mode === 'signup' ? 'bg-white shadow-sm' : ''}`}
+              onClick={() => {
+                setMode('signup');
+                setError('');
+                setNotice('');
+              }}
+            >
+              Cadastro
+            </button>
+          </div>
+          {!hasSupabaseConfig ? (
+            <p className="mt-3 rounded-md bg-amber-50 px-3 py-2.5 text-[13px] font-semibold leading-5 text-amber-800 sm:mt-4 sm:px-4 sm:py-3 sm:text-sm">
+              {configNotice}
+            </p>
+          ) : null}
+          <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-3.5">
           {mode === 'signup' ? (
-            <div className="grid gap-3.5 md:grid-cols-2 md:gap-4">
+            <div className="grid gap-3 md:grid-cols-2 md:gap-4">
               <Field label="Nome completo">
                 <TextInput value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} required />
               </Field>
@@ -4510,10 +4522,6 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             />
           </Field>
-          <Button type="submit" disabled={submitting}>
-            {mode === 'login' ? <Lock size={18} /> : <UserPlus size={18} />}
-            {submitting ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Cadastrar'}
-          </Button>
           {mode === 'login' && hasSupabaseConfig ? (
             <button type="button" className="text-right text-xs font-bold text-leaf" onClick={sendPasswordReset}>
               Recuperar senha
@@ -4532,7 +4540,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
                     key={provider}
                     type="button"
                     variant="outline"
-                    className="min-h-10 px-3 py-2"
+                    className="min-h-9 px-3 py-2 sm:min-h-10"
                     onClick={() => signInWithProvider(provider)}
                     aria-label={`Entrar com ${label}`}
                     title={label}
@@ -4543,7 +4551,16 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
               </div>
             </div>
           ) : null}
-          <p className="text-center text-xs text-ink/55">
+        </div>
+        </div>
+        <div className="shrink-0 border-t border-ink/10 bg-white/95 p-3 backdrop-blur sm:p-5">
+          {error ? <p className="mb-2 max-h-16 overflow-y-auto text-[13px] font-semibold leading-5 text-red-700 sm:text-sm">{error}</p> : null}
+          {notice ? <p className="mb-2 max-h-16 overflow-y-auto text-[13px] leading-5 text-ink/70 sm:text-sm">{notice}</p> : null}
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {mode === 'login' ? <Lock size={18} /> : <UserPlus size={18} />}
+            {submitting ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Cadastrar'}
+          </Button>
+          <p className="mt-2 text-center text-xs text-ink/55">
             {mode === 'login' ? 'Não tem conta?' : 'Já tem conta?'}{' '}
             <button
               type="button"
@@ -4557,8 +4574,6 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
               {mode === 'login' ? 'Criar cadastro' : 'Entrar'}
             </button>
           </p>
-          {error ? <p className="text-sm font-semibold text-red-700">{error}</p> : null}
-          {notice ? <p className="text-sm leading-6 text-ink/70">{notice}</p> : null}
         </div>
       </form>
     </div>
@@ -4619,21 +4634,25 @@ function PasswordRecoveryModal({ onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-ink/60 p-4 backdrop-blur">
-      <form className="w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft dark:bg-slate-900 dark:text-white" onSubmit={submit}>
-        <div className="flex items-start justify-between gap-4">
+    <div className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-ink/60 p-2 py-3 backdrop-blur sm:p-4">
+      <form
+        className="flex max-h-[calc(100dvh-1rem)] w-[95vw] max-w-md flex-col overflow-hidden rounded-md bg-white text-ink shadow-soft dark:bg-slate-900 dark:text-white sm:max-h-[90vh] sm:w-full"
+        onSubmit={submit}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-ink/10 px-3 py-3 sm:gap-4 sm:px-5 sm:py-5">
           <div className="flex items-center gap-3">
-            <BrandLogo variant="mark" className="h-14 w-14 rounded-xl shadow-sm" />
+            <BrandLogo variant="mark" className="h-11 w-11 rounded-xl shadow-sm sm:h-14 sm:w-14" />
             <div>
-            <h2 className="text-2xl font-black">Criar nova senha</h2>
-              <p className="mt-1 text-sm text-ink/65 dark:text-white/65">Defina uma nova senha para acessar sua conta.</p>
+            <h2 className="text-lg font-black sm:text-2xl">Criar nova senha</h2>
+              <p className="mt-1 text-xs text-ink/65 dark:text-white/65 sm:text-sm">Defina uma nova senha para acessar sua conta.</p>
             </div>
           </div>
           <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar recuperação">
             <X size={18} />
           </Button>
         </div>
-        <div className="mt-5 grid gap-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-5">
+        <div className="grid gap-3 sm:gap-4">
           <Field label="Nova senha">
             <TextInput
               type="password"
@@ -4654,12 +4673,15 @@ function PasswordRecoveryModal({ onClose }) {
               required
             />
           </Field>
-          <Button type="submit" disabled={submitting}>
+          {error ? <p className="text-sm font-semibold text-red-700">{error}</p> : null}
+          {message ? <p className="text-sm font-semibold text-leaf">{message}</p> : null}
+        </div>
+        </div>
+        <div className="shrink-0 border-t border-ink/10 bg-white/95 p-3 backdrop-blur dark:bg-slate-900/95 sm:p-5">
+          <Button type="submit" className="w-full" disabled={submitting}>
             <Save size={18} />
             {submitting ? 'Salvando...' : 'Salvar nova senha'}
           </Button>
-          {error ? <p className="text-sm font-semibold text-red-700">{error}</p> : null}
-          {message ? <p className="text-sm font-semibold text-leaf">{message}</p> : null}
         </div>
       </form>
     </div>
@@ -4726,9 +4748,9 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-ink/60 p-3 backdrop-blur">
-      <div className="mx-auto grid h-full max-w-6xl overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft lg:grid-cols-[260px_1fr]">
-        <aside className="border-b border-ink/10 bg-white p-4 lg:border-b-0 lg:border-r">
+    <div className="fixed inset-0 z-50 bg-ink/60 p-1.5 backdrop-blur sm:p-3">
+      <div className="mx-auto grid h-[calc(100dvh-0.75rem)] max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-1.5rem)] lg:grid-cols-[260px_1fr] lg:grid-rows-none">
+        <aside className="border-b border-ink/10 bg-white p-3 sm:p-4 lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-3 lg:block">
             <div>
               <h2 className="text-xl font-black">Portal do cliente</h2>
@@ -4738,12 +4760,12 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
               <X size={18} />
             </Button>
           </div>
-          <nav className="mt-5 grid gap-2">
+          <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:mt-5 lg:grid lg:overflow-visible lg:pb-0">
             {menu.map(([key, label, icon]) => (
               <button
                 key={key}
                 type="button"
-                className={`flex items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-black transition ${
+                className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 lg:py-3 ${
                   view === key ? 'bg-ink text-white' : 'hover:bg-mist'
                 }`}
                 onClick={() => setView(key)}
@@ -4753,12 +4775,12 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
               </button>
             ))}
           </nav>
-          <Button type="button" variant="outline" onClick={onSignOut} className="mt-5 w-full">
+          <Button type="button" variant="outline" onClick={onSignOut} className="mt-3 w-full lg:mt-5">
             <LogOut size={18} />
             Sair
           </Button>
         </aside>
-        <main className="overflow-auto p-5">
+        <main className="min-h-0 overflow-auto p-3 sm:p-5">
           <div className="hidden justify-end lg:flex">
             <Button type="button" variant="outline" onClick={onClose}>
               <X size={18} />
@@ -6010,23 +6032,23 @@ function AdminPanel({
 
   if (ownerPanelBlocked) {
     return (
-      <div className="fixed inset-0 z-40 bg-ink/55 p-3 backdrop-blur-sm">
-        <div className="ml-auto h-full max-w-3xl overflow-auto rounded-md bg-[#f4f8ff] shadow-soft">
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-5 py-4 text-white">
+      <div className="fixed inset-0 z-40 bg-ink/55 p-1.5 backdrop-blur-sm sm:p-3">
+        <div className="ml-auto h-[calc(100dvh-0.75rem)] max-w-3xl overflow-auto rounded-md bg-[#f4f8ff] shadow-soft sm:h-[calc(100dvh-1.5rem)]">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
             <div>
-              <h2 className="text-2xl font-black">Administração</h2>
-              <p className="text-sm text-white/75">Acesso temporariamente bloqueado.</p>
+              <h2 className="text-lg font-black sm:text-2xl">Administração</h2>
+              <p className="text-xs text-white/75 sm:text-sm">Acesso temporariamente bloqueado.</p>
             </div>
             <Button variant="outline" onClick={onClose} aria-label="Fechar painel">
               <X size={18} />
             </Button>
           </div>
-          <div className="grid h-[calc(100%-76px)] place-items-center p-5">
-            <div className="max-w-lg rounded-md border border-red-200 bg-red-50 p-6 text-red-800 shadow-sm">
+          <div className="grid min-h-[calc(100%-64px)] place-items-center p-3 sm:p-5">
+            <div className="max-w-lg rounded-md border border-red-200 bg-red-50 p-4 text-red-800 shadow-sm sm:p-6">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-1 shrink-0" />
                 <div>
-                  <h3 className="text-2xl font-black">
+                  <h3 className="text-lg font-black sm:text-2xl">
                     {propertyLicense ? `Licenca ${licenseStatusLabels[normalizeLicenseStatus(propertyLicense)]}` : 'Aguardando liberacao da licenca'}
                   </h3>
                   <p className="mt-2 text-sm leading-6">
@@ -6047,12 +6069,12 @@ function AdminPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-40 bg-ink/55 p-2 backdrop-blur-sm sm:p-4">
-      <div className="ml-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-5 py-4 text-white">
+    <div className="fixed inset-0 z-40 bg-ink/55 p-1.5 backdrop-blur-sm sm:p-4">
+      <div className="ml-auto flex h-[calc(100dvh-0.75rem)] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-2rem)]">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
           <div>
-            <h2 className="text-2xl font-black">Administração</h2>
-            <p className="text-sm text-white/75">Atualize valores, fotos e reservas.</p>
+            <h2 className="text-lg font-black sm:text-2xl">Administração</h2>
+            <p className="hidden text-sm text-white/75 sm:block">Atualize valores, fotos e reservas.</p>
           </div>
           <Button variant="outline" onClick={onClose} aria-label="Fechar painel">
             <X size={18} />
@@ -6061,7 +6083,7 @@ function AdminPanel({
 
         {!adminUnlocked ? (
           <form
-            className="grid gap-4 p-5"
+            className="grid gap-3 p-3 sm:gap-4 sm:p-5"
             onSubmit={async (event) => {
               event.preventDefault();
               setLoginError('');
@@ -6161,19 +6183,19 @@ function AdminPanel({
             </p>
           </form>
         ) : (
-          <div className="grid min-h-0 flex-1 gap-5 overflow-auto p-4 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start lg:p-5">
+          <div className="grid min-h-0 flex-1 gap-3 overflow-auto p-3 sm:gap-5 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start lg:p-5">
             <aside className="h-fit rounded-md bg-white p-3 shadow-sm lg:sticky lg:top-0">
               <div className="mb-3 rounded-md bg-[#f4f8ff] p-3">
                 <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Painel</p>
                 <p className="mt-1 text-sm font-black">{adminDetails.full_name || authProfile?.full_name || 'Administrador'}</p>
                 <p className="mt-1 truncate text-xs font-semibold text-ink/55">{adminDetails.email || authProfile?.email || adminEmail}</p>
               </div>
-              <nav className="grid gap-1">
+              <nav className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
                 {adminMenu.map(([key, label, icon]) => (
                   <button
                     key={key}
                     type="button"
-                    className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-black transition ${
+                    className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 ${
                       adminView === key ? 'bg-ink text-white' : 'hover:bg-mist'
                     }`}
                     onClick={() => setAdminView(key)}
@@ -6290,32 +6312,39 @@ function AdminPanel({
                       <Button
                         type="button"
                         variant={item.id === property.id && !showNewProperty ? 'secondary' : 'outline'}
-                        className="px-3"
+                        className="h-10 w-10 px-0 sm:w-auto sm:px-3"
                         onClick={() => startEditProperty(item.id)}
                         aria-label={`Editar ${item.name}`}
                       >
                         <Pencil size={16} />
-                        Editar
+                        <span className="sr-only sm:not-sr-only">Editar</span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
-                        className="px-3"
+                        className="h-10 w-10 px-0 sm:w-auto sm:px-3"
                         onClick={() => {
                           if (typeof window !== 'undefined') window.location.href = propertyPath(item);
                         }}
+                        aria-label={`Ver página de ${item.name}`}
                       >
                         <Home size={16} />
-                        Ver página
-                      </Button>
-                      <Button type="button" variant="outline" className="px-3" onClick={() => copyPropertyLink(item)}>
-                        <Copy size={16} />
-                        Copiar link
+                        <span className="sr-only sm:not-sr-only">Ver página</span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
-                        className="px-3"
+                        className="h-10 w-10 px-0 sm:w-auto sm:px-3"
+                        onClick={() => copyPropertyLink(item)}
+                        aria-label={`Copiar link de ${item.name}`}
+                      >
+                        <Copy size={16} />
+                        <span className="sr-only sm:not-sr-only">Copiar link</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 w-10 px-0 sm:w-auto sm:px-3"
                         onClick={() => deleteProperty(item.id)}
                         aria-label={`Excluir ${item.name}`}
                       >
@@ -6338,9 +6367,9 @@ function AdminPanel({
             </section>
 
             {showNewProperty && adminView === 'houses' ? (
-              <form className="grid gap-4 rounded-md border border-leaf/20 bg-white p-4 shadow-sm" onSubmit={submitNewProperty}>
-                <h3 className="text-xl font-black">Cadastrar nova casa</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
+              <form className="grid gap-3 rounded-md border border-leaf/20 bg-white p-3 shadow-sm sm:gap-4 sm:p-4" onSubmit={submitNewProperty}>
+                <h3 className="text-lg font-black sm:text-xl">Cadastrar nova casa</h3>
+                <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
                   <Field label="Nome">
                     <TextInput
                       value={newProperty.name}
@@ -6461,11 +6490,11 @@ function AdminPanel({
                     placeholder="Cancelamento com no mínimo 2 meses de antecedência, retenção de 50% em cancelamentos em cima da hora"
                   />
                 </Field>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setShowNewProperty(false)}>
+                <div className="sticky bottom-0 z-10 -mx-3 flex flex-col gap-2 border-t border-ink/10 bg-white/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:justify-end sm:border-0 sm:bg-transparent sm:p-0">
+                  <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setShowNewProperty(false)}>
                     Cancelar
                   </Button>
-                  <Button type="submit" variant="secondary">
+                  <Button type="submit" variant="secondary" className="w-full sm:w-auto">
                     <DoorOpen size={18} />
                     Cadastrar casa
                   </Button>
@@ -7310,8 +7339,8 @@ function AdminPanel({
               </section>
             ) : null}
             {cancelTarget ? (
-              <div className="fixed inset-0 z-50 grid place-items-center bg-ink/60 p-4 backdrop-blur">
-                <div className="w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft">
+              <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/60 p-2 py-3 backdrop-blur sm:p-4">
+                <div className="max-h-[90dvh] w-[95vw] max-w-md overflow-y-auto rounded-md bg-white p-4 text-ink shadow-soft sm:w-full sm:p-5">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-1 text-red-600" />
                     <div>
@@ -7321,11 +7350,11 @@ function AdminPanel({
                       </p>
                     </div>
                   </div>
-                  <div className="mt-5 flex flex-wrap justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setCancelTarget(null)}>
+                  <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                    <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setCancelTarget(null)}>
                       Voltar
                     </Button>
-                    <Button type="button" variant="secondary" onClick={confirmCancellation}>
+                    <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={confirmCancellation}>
                       Confirmar cancelamento
                     </Button>
                   </div>

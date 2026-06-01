@@ -19,7 +19,7 @@ export default function UserMenu({ authProfile, menuItems = [], onNavigate, onSi
         <User size={19} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-ink/10 dark:bg-slate-900 dark:text-white dark:ring-white/10">
+        <div className="absolute right-0 top-full mt-2 w-[min(18rem,calc(100vw-1rem))] overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-ink/10 dark:bg-slate-900 dark:text-white dark:ring-white/10">
           <div className="border-b border-ink/10 px-4 py-3 text-sm dark:border-white/10">
             <p className="font-black">{authProfile?.full_name || 'Usuário'}</p>
             <p className="truncate text-xs text-ink/55 dark:text-white/55">{authProfile?.email}</p>
