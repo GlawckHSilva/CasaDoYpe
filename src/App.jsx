@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   BadgeDollarSign,
@@ -845,6 +846,9 @@ function SelectInput({ children, ...props }) {
 }
 
 export default function App() {
+  const location = useLocation();
+  const routerNavigate = useNavigate();
+  const route = location.pathname || '/';
   const [properties, setProperties] = useState(() => (useDemoFallback ? readLocalData('properties', demoProperties) : []));
   const [selectedPropertyId, setSelectedPropertyId] = useState(() => (useDemoFallback ? readLocalData('selectedPropertyId', demoProperty.id) : ''));
   const [photos, setPhotos] = useState(() => (useDemoFallback ? readLocalData('photos', demoPhotos) : []));
@@ -861,7 +865,6 @@ export default function App() {
   const [paymentSettings, setPaymentSettings] = useState(() => (useDemoFallback ? readLocalData('paymentSettings', []) : []));
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [heroPhotoIndex, setHeroPhotoIndex] = useState(0);
-  const [route, setRoute] = useState(() => (typeof window === 'undefined' ? '/' : window.location.pathname || '/'));
   const [month, setMonth] = useState(new Date());
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -1140,18 +1143,9 @@ export default function App() {
     loadSupabaseData();
   }, []);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const onPopState = () => setRoute(window.location.pathname || '/');
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  function navigateTo(path) {
-    if (typeof window !== 'undefined' && window.location.pathname !== path) {
-      window.history.pushState({}, '', path);
-    }
-    setRoute(path);
+  function navigateTo(path, options = {}) {
+    if (!path || route === path) return;
+    routerNavigate(path, { replace: Boolean(options.replace) });
   }
 
   function openAuth(mode = 'login') {
@@ -1338,12 +1332,12 @@ export default function App() {
     const protectedRoutes = ['/super-admin', '/admin', '/hospede'];
     if (!protectedRoutes.includes(route)) return;
     if (!authProfile) {
-      if (route !== '/login') navigateTo('/login');
+      if (route !== '/login') navigateTo('/login', { replace: true });
       return;
     }
     if (!canAccessRoute(route, authProfile)) {
       const nextPath = roleHomePath(authProfile?.role);
-      if (nextPath !== route) navigateTo(nextPath);
+      if (nextPath !== route) navigateTo(nextPath, { replace: true });
       return;
     }
   }, [route, authProfile, authChecked]);
