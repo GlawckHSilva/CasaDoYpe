@@ -441,6 +441,30 @@ async function safeSupabaseQuery(query, timeoutMs = 12000, timeoutMessage = 'Con
   }
 }
 
+async function getFunctionErrorMessage(error, fallback = 'Erro interno ao executar a função.') {
+  try {
+    const response = error?.context?.clone?.();
+    if (response) {
+      const contentType = response.headers?.get?.('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const body = await response.json();
+        if (typeof body?.error === 'string') return body.error;
+        if (typeof body?.message === 'string') return body.message;
+        if (typeof body?.detail === 'string') return body.detail;
+      }
+
+      const text = await response.text();
+      if (text) return text;
+    }
+  } catch (_parseError) {
+    // Keep the user-facing fallback instead of surfacing a parser failure.
+  }
+
+  const sdkMessage = error?.message || '';
+  if (sdkMessage && !/non-2xx status code/i.test(sdkMessage)) return sdkMessage;
+  return fallback;
+}
+
 function mixHex(color, target, amount) {
   const source = normalizeHexColor(color).slice(1).match(/.{2}/g).map((part) => parseInt(part, 16));
   const goal = normalizeHexColor(target).slice(1).match(/.{2}/g).map((part) => parseInt(part, 16));
@@ -3485,19 +3509,29 @@ function SuperAdminDashboard({
 
   async function deleteUser(profile) {
     if (!profile?.id) return;
+    if (normalizeRole(authProfile?.role) !== 'super_admin') {
+      setUserNotice('Você não tem permissão para excluir usuários.');
+      return;
+    }
     if (isSuperAdminEmail(profile.email)) {
       setUserNotice('O Super Admin principal não pode ser excluído.');
       return;
     }
-    const confirmed = window.confirm('Tem certeza que deseja excluir este usuário?');
+    const confirmed = window.confirm('Tem certeza que deseja excluir este usuário? Essa ação apagará o histórico dele e não poderá ser desfeita.');
     if (!confirmed) return;
 
     if (hasSupabaseConfig) {
-      const { error } = await supabase.functions.invoke('delete-user-cascade', {
-        body: { userId: profile.id },
+      setUserNotice('Excluindo usuário...');
+      const { data, error } = await supabase.functions.invoke('delete-user-cascade', {
+        body: { userId: profile.id, email: profile.email },
       });
       if (error) {
-        setUserNotice(`Não foi possível excluir: ${error.message || 'confira a Edge Function.'}`);
+        const message = await getFunctionErrorMessage(error, 'Edge Function não configurada ou não publicada.');
+        setUserNotice(`Não foi possível excluir: ${message}`);
+        return;
+      }
+      if (data?.error) {
+        setUserNotice(`Não foi possível excluir: ${data.error}`);
         return;
       }
     }
