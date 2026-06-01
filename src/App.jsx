@@ -759,13 +759,13 @@ function MaterialIcon({ name, className = '', size = 20 }) {
 }
 
 function PanelIcon({ icon, className = '', size = 18 }) {
-  if (typeof icon === 'function') {
+  if (typeof icon === 'function' || (typeof icon === 'object' && icon?.$$typeof)) {
     const Icon = icon;
     return <Icon className={className} size={size} aria-hidden="true" />;
   }
   const Icon = panelIconMap[icon];
   if (Icon) return <Icon className={className} size={size} aria-hidden="true" />;
-  return <MaterialIcon name={icon} className={className} size={size} />;
+  return <MaterialIcon name={String(icon || '')} className={className} size={size} />;
 }
 
 function BrandLogo({ variant = 'horizontal', className = 'h-10 w-auto', alt = 'Hospedex' }) {
