@@ -5,7 +5,6 @@ import {
   BarChart3,
   Bath,
   BedDouble,
-  Bell,
   Building2,
   Banknote,
   CalendarDays,
@@ -80,7 +79,16 @@ import { hasSupabaseConfig, supabase, supabaseConfig } from './services/supabase
 import { canUseDemoFallback, getInitialThemeMode, readLocalData, writeLocalData } from './services/storageService.js';
 import { createPropertyRecord, deletePropertyRecord, updatePropertyRecord } from './services/propertyService.js';
 import { createReservationRecord } from './services/reservationService.js';
-import { deleteLicenseRecord, upsertLicenseRecord } from './services/licenseService.js';
+import { deleteLicenseRecord, getOwnerPanelAccessState, upsertLicenseRecord } from './services/licenseService.js';
+import NavbarShell from './components/Navbar.jsx';
+import UserMenu from './components/UserMenu.jsx';
+import HomePage from './pages/Home.jsx';
+import CasasPage from './pages/Casas.jsx';
+import CasaDetalhePage from './pages/CasaDetalhe.jsx';
+import LoginPage from './pages/Login.jsx';
+import AdminDashboardPage from './pages/AdminDashboard.jsx';
+import SuperAdminDashboardPage from './pages/SuperAdminDashboard.jsx';
+import HospedePortalPage from './pages/HospedePortal.jsx';
 
 const currency = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -1111,7 +1119,7 @@ export default function App() {
           supabase.from('profiles').upsert({
             id: session.user.id,
             email: session.user.email,
-            role: isSuperAdminEmail(session.user.email) ? 'super_admin' : 'hospede',
+            role: profile.role || 'hospede',
             full_name: profile.full_name,
             phone: profile.phone,
           }),
@@ -1885,90 +1893,96 @@ export default function App() {
 
   if (route === '/login') {
     return (
-      <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
-        <AuthModal
-          initialMode={authInitialMode}
-          onClose={() => navigateTo('/')}
-          onAuthenticated={(profile) => {
-            setAuthProfile(profile);
-            setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
-            setAdminOpen(false);
-            setClientPortalOpen(false);
-            navigateTo(roleHomePath(profile.role));
-          }}
-          resolveAuthProfile={resolveAuthProfile}
-        />
-        {passwordRecoveryOpen ? (
+      <LoginPage>
+        <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
+          <AuthModal
+            initialMode={authInitialMode}
+            onClose={() => navigateTo('/')}
+            onAuthenticated={(profile) => {
+              setAuthProfile(profile);
+              setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
+              setAdminOpen(false);
+              setClientPortalOpen(false);
+              navigateTo(roleHomePath(profile.role));
+            }}
+            resolveAuthProfile={resolveAuthProfile}
+          />
+          {passwordRecoveryOpen ? (
+            <PasswordRecoveryModal
+              onClose={() => {
+                setPasswordRecoveryOpen(false);
+                navigateTo('/login');
+              }}
+            />
+          ) : null}
+        </div>
+      </LoginPage>
+    );
+  }
+
+  if (route === '/reset-password' || route === '/resetar-senha') {
+    return (
+      <LoginPage>
+        <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
           <PasswordRecoveryModal
             onClose={() => {
               setPasswordRecoveryOpen(false);
               navigateTo('/login');
             }}
           />
-        ) : null}
-      </div>
-    );
-  }
-
-  if (route === '/reset-password' || route === '/resetar-senha') {
-    return (
-      <div className="min-h-screen bg-[#f4f8ff] text-ink" style={propertyThemeStyle}>
-        <PasswordRecoveryModal
-          onClose={() => {
-            setPasswordRecoveryOpen(false);
-            navigateTo('/login');
-          }}
-        />
-      </div>
+        </div>
+      </LoginPage>
     );
   }
 
   if (route === '/super-admin') {
     return (
-      <AuthGuard
-        loading={!authChecked}
-        authenticated={Boolean(authProfile)}
-        allowed={normalizeRole(authProfile?.role) === 'super_admin'}
-        unauthenticatedFallback={
-          <AccessDenied
-            title="Login necessário"
-            text="Entre para acessar a área de Super Admin."
-            onLogin={() => navigateTo('/login')}
+      <SuperAdminDashboardPage>
+        <AuthGuard
+          loading={!authChecked}
+          authenticated={Boolean(authProfile)}
+          allowed={normalizeRole(authProfile?.role) === 'super_admin'}
+          unauthenticatedFallback={
+            <AccessDenied
+              title="Login necessário"
+              text="Entre para acessar a área de Super Admin."
+              onLogin={() => navigateTo('/login')}
+              onHome={() => navigateTo('/')}
+            />
+          }
+          deniedFallback={
+            <AccessDenied
+              title="Acesso restrito"
+              text="A área de Super Admin é privada e exige permissão super_admin."
+              onLogin={() => navigateTo('/login')}
+              onHome={() => navigateTo('/')}
+            />
+          }
+        >
+          <SuperAdminDashboard
+            profiles={profiles}
+            properties={properties}
+            reservations={reservations}
+            cashMovements={cashMovements}
+            licenses={licenses}
+            setLicenses={setLicenses}
+            licenseHistory={licenseHistory}
+            suggestions={suggestions}
+            setLicenseHistory={setLicenseHistory}
+            setProfiles={setProfiles}
+            setProperties={setProperties}
+            authProfile={authProfile}
+            supportTickets={supportTickets}
+            onSignOut={signOut}
             onHome={() => navigateTo('/')}
+            onRefresh={loadSupabaseData}
+            addAdminLog={addAdminLog}
+            homeBanners={homeBanners}
+            setHomeBanners={setHomeBanners}
+            initialView={superAdminInitialView}
           />
-        }
-        deniedFallback={
-          <AccessDenied
-            title="Acesso restrito"
-            text="A área de Super Admin é privada e exige permissão super_admin."
-            onLogin={() => navigateTo('/login')}
-            onHome={() => navigateTo('/')}
-          />
-        }
-      >
-        <SuperAdminDashboard
-          profiles={profiles}
-          properties={properties}
-          reservations={reservations}
-          cashMovements={cashMovements}
-          licenses={licenses}
-          setLicenses={setLicenses}
-          licenseHistory={licenseHistory}
-          suggestions={suggestions}
-          setLicenseHistory={setLicenseHistory}
-          setProfiles={setProfiles}
-          setProperties={setProperties}
-          authProfile={authProfile}
-          supportTickets={supportTickets}
-          onSignOut={signOut}
-          onHome={() => navigateTo('/')}
-          onRefresh={loadSupabaseData}
-          addAdminLog={addAdminLog}
-          homeBanners={homeBanners}
-          setHomeBanners={setHomeBanners}
-          initialView={superAdminInitialView}
-        />
-      </AuthGuard>
+        </AuthGuard>
+      </SuperAdminDashboardPage>
     );
   }
 
@@ -2005,40 +2019,44 @@ export default function App() {
 
   if (route === '/') {
     return (
-      <MarketingHome
-        authProfile={authProfile}
-        dataChecked={publicDataChecked}
-        photos={photos}
-        properties={publicProperties}
-        homeBanners={homeBanners}
-        onNavigate={navigateTo}
-        onAuth={openAuth}
-        onOpenAdmin={openAdminSection}
-        onOpenClient={openClientSection}
-        onOpenSuperAdmin={openSuperAdminSection}
-        onSignOut={signOut}
-        themeMode={themeMode}
-        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
-      />
+      <HomePage>
+        <MarketingHome
+          authProfile={authProfile}
+          dataChecked={publicDataChecked}
+          photos={photos}
+          properties={publicProperties}
+          homeBanners={homeBanners}
+          onNavigate={navigateTo}
+          onAuth={openAuth}
+          onOpenAdmin={openAdminSection}
+          onOpenClient={openClientSection}
+          onOpenSuperAdmin={openSuperAdminSection}
+          onSignOut={signOut}
+          themeMode={themeMode}
+          onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+        />
+      </HomePage>
     );
   }
 
   if (route === '/casas') {
     return (
-      <HousesListingPage
-        authProfile={authProfile}
-        dataChecked={publicDataChecked}
-        photos={photos}
-        properties={publicProperties}
-        onNavigate={navigateTo}
-        onAuth={openAuth}
-        onOpenAdmin={openAdminSection}
-        onOpenClient={openClientSection}
-        onOpenSuperAdmin={openSuperAdminSection}
-        onSignOut={signOut}
-        themeMode={themeMode}
-        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
-      />
+      <CasasPage>
+        <HousesListingPage
+          authProfile={authProfile}
+          dataChecked={publicDataChecked}
+          photos={photos}
+          properties={publicProperties}
+          onNavigate={navigateTo}
+          onAuth={openAuth}
+          onOpenAdmin={openAdminSection}
+          onOpenClient={openClientSection}
+          onOpenSuperAdmin={openSuperAdminSection}
+          onSignOut={signOut}
+          themeMode={themeMode}
+          onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+        />
+      </CasasPage>
     );
   }
 
@@ -2086,14 +2104,15 @@ export default function App() {
   }
 
   return (
-    <div
-      className={
-        themeMode === 'dark'
-          ? 'dark min-h-screen bg-slate-950 text-white'
-          : 'min-h-screen bg-[#f4f8ff] text-ink'
-      }
-      style={propertyThemeStyle}
-    >
+    <CasaDetalhePage>
+      <div
+        className={
+          themeMode === 'dark'
+            ? 'dark min-h-screen bg-slate-950 text-white'
+            : 'min-h-screen bg-[#f4f8ff] text-ink'
+        }
+        style={propertyThemeStyle}
+      >
       <header className="sticky top-0 z-30 border-b border-blue-100/80 bg-white/95 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/95">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
           <a href="#inicio" className="flex items-center gap-3 font-bold text-ink dark:text-white">
@@ -2567,46 +2586,48 @@ export default function App() {
       </footer>
 
       {adminOpen || (route === '/admin' && canAccessRoute('/admin', authProfile)) ? (
-        <AdminPanel
-          addProperty={addProperty}
-          addPhoto={addPhoto}
-          adminUnlocked={adminUnlocked}
-          adminSession={adminSession}
-          deleteProperty={deleteProperty}
-          deletePhoto={deletePhoto}
-          onClose={() => {
-            setAdminOpen(false);
-            if (route === '/admin') navigateTo('/');
-          }}
-          onUnlock={() => setAdminUnlocked(true)}
-          onSelectProperty={selectProperty}
-          properties={adminProperties}
-          property={adminProperty}
-          propertyLicense={adminPropertyLicense}
-          propertyPaymentSettings={adminPropertyPaymentSettings}
-          propertyPhotos={adminPropertyPhotos}
-          reservations={adminPropertyReservations}
-          cashMovements={adminPropertyCashMovements}
-          financialSummary={adminFinancialSummary}
-          interestRates={interestRates}
-          setInterestRates={setInterestRates}
-          saveInterestRates={saveInterestRates}
-          suggestions={suggestions}
-          adminLogs={adminLogs}
-          authProfile={authProfile}
-          onSignOut={signOut}
-          addAdminLog={addAdminLog}
-          createManualReservation={createManualReservation}
-          createPaymentLink={createPaymentLink}
-          reorderPhoto={reorderPhoto}
-          registerPayment={registerPayment}
-          addCashMovement={addCashMovement}
-          saveProperty={saveProperty}
-          savePaymentSettings={savePaymentSettings}
-          updateReservationDetails={updateReservationDetails}
-          updateReservationStatus={updateReservationStatus}
-          initialView={adminInitialView}
-        />
+        <AdminDashboardPage>
+          <AdminPanel
+            addProperty={addProperty}
+            addPhoto={addPhoto}
+            adminUnlocked={adminUnlocked}
+            adminSession={adminSession}
+            deleteProperty={deleteProperty}
+            deletePhoto={deletePhoto}
+            onClose={() => {
+              setAdminOpen(false);
+              if (route === '/admin') navigateTo('/');
+            }}
+            onUnlock={() => setAdminUnlocked(true)}
+            onSelectProperty={selectProperty}
+            properties={adminProperties}
+            property={adminProperty}
+            propertyLicense={adminPropertyLicense}
+            propertyPaymentSettings={adminPropertyPaymentSettings}
+            propertyPhotos={adminPropertyPhotos}
+            reservations={adminPropertyReservations}
+            cashMovements={adminPropertyCashMovements}
+            financialSummary={adminFinancialSummary}
+            interestRates={interestRates}
+            setInterestRates={setInterestRates}
+            saveInterestRates={saveInterestRates}
+            suggestions={suggestions}
+            adminLogs={adminLogs}
+            authProfile={authProfile}
+            onSignOut={signOut}
+            addAdminLog={addAdminLog}
+            createManualReservation={createManualReservation}
+            createPaymentLink={createPaymentLink}
+            reorderPhoto={reorderPhoto}
+            registerPayment={registerPayment}
+            addCashMovement={addCashMovement}
+            saveProperty={saveProperty}
+            savePaymentSettings={savePaymentSettings}
+            updateReservationDetails={updateReservationDetails}
+            updateReservationStatus={updateReservationStatus}
+            initialView={adminInitialView}
+          />
+        </AdminDashboardPage>
       ) : null}
 
       {authOpen ? (
@@ -2630,24 +2651,27 @@ export default function App() {
       ) : null}
 
       {clientPortalOpen || (route === '/hospede' && canAccessRoute('/hospede', authProfile)) ? (
-        <ClientPortal
-          authProfile={authProfile}
-          reservations={reservations}
-          properties={properties}
-          onUpdateProfile={updateClientProfile}
-          voucherSummary={getVoucherSummary(
-            reservations.filter((reservation) => reservation.guest_email === authProfile?.email),
-          )}
-          onClose={() => {
-            setClientPortalOpen(false);
-            if (route === '/hospede') navigateTo('/');
-          }}
-          onSignOut={signOut}
-          initialView={clientPortalInitialView}
-        />
+        <HospedePortalPage>
+          <ClientPortal
+            authProfile={authProfile}
+            reservations={reservations}
+            properties={properties}
+            onUpdateProfile={updateClientProfile}
+            voucherSummary={getVoucherSummary(
+              reservations.filter((reservation) => reservation.guest_email === authProfile?.email),
+            )}
+            onClose={() => {
+              setClientPortalOpen(false);
+              if (route === '/hospede') navigateTo('/');
+            }}
+            onSignOut={signOut}
+            initialView={clientPortalInitialView}
+          />
+        </HospedePortalPage>
       ) : null}
 
-    </div>
+      </div>
+    </CasaDetalhePage>
   );
 }
 
@@ -2684,7 +2708,6 @@ function PublicTopBar({
   themeMode = 'light',
   onToggleTheme,
 }) {
-  const [open, setOpen] = useState(false);
   const role = normalizeRole(authProfile?.role);
   const linkClass = `inline-flex items-center gap-2 transition ${transparent ? 'hover:text-white' : 'hover:text-leaf'}`;
   const menuItems =
@@ -2724,106 +2747,73 @@ function PublicTopBar({
     else onOpenAdmin?.('settings');
   };
 
+  const brand = (
+    <button type="button" className="flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
+      <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-11 w-11 rounded-md shadow-sm" />
+    </button>
+  );
+  const navigation = (
+    <nav className="hidden items-center gap-5 text-sm font-bold md:flex">
+      <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>
+        <Home size={16} />
+        Hospedagens
+      </button>
+      <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>
+        <BadgeDollarSign size={16} />
+        Planos
+      </button>
+      <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
+        <ShieldCheck size={16} />
+        Sobre
+      </button>
+      <a className={linkClass} href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram">
+        <Instagram size={18} />
+      </a>
+      <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer" aria-label="Email">
+        <Mail size={18} />
+      </a>
+      <a className={linkClass} href={socialLinks.twitter} target="_blank" rel="noreferrer" aria-label="Twitter X">
+        <Twitter size={18} />
+      </a>
+    </nav>
+  );
+  const themeToggle = (
+    <button type="button" className="brand-icon-button" onClick={onToggleTheme} aria-label="Alternar tema" title="Alternar tema">
+      {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+    </button>
+  );
+  const account = authProfile ? (
+    <UserMenu
+      authProfile={authProfile}
+      menuItems={menuItems}
+      onNavigate={onNavigate}
+      onSignOut={onSignOut}
+      onOpenSupport={openSupport}
+      onOpenSettings={openSettings}
+    />
+  ) : (
+    <div className="flex items-center gap-2">
+      <Button type="button" variant="outline" className="px-3 sm:px-5" onClick={() => onAuth?.('login') || onNavigate('/login')}>
+        <Lock size={17} />
+        Login
+      </Button>
+      <Button type="button" className="hidden sm:inline-flex" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
+        <UserPlus size={17} />
+        Cadastrar
+      </Button>
+    </div>
+  );
+
   return (
-    <header className={`sticky top-0 z-30 border-b backdrop-blur ${transparent ? 'border-white/15 bg-ink/75 text-white' : 'border-ink/10 bg-white/95 text-ink shadow-sm'}`}>
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-        <button type="button" className="flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
-          <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-11 w-11 rounded-md shadow-sm" />
-        </button>
-        <nav className="hidden items-center gap-5 text-sm font-bold md:flex">
-          <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>
-            <Home size={16} />
-            Hospedagens
-          </button>
-          <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>
-            <BadgeDollarSign size={16} />
-            Planos
-          </button>
-          <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
-            <ShieldCheck size={16} />
-            Sobre
-          </button>
-          <a className={linkClass} href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram">
-            <Instagram size={18} />
-          </a>
-          <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer" aria-label="Email">
-            <Mail size={18} />
-          </a>
-          <a className={linkClass} href={socialLinks.twitter} target="_blank" rel="noreferrer" aria-label="Twitter X">
-            <Twitter size={18} />
-          </a>
-        </nav>
-        <button type="button" className="brand-icon-button" onClick={onToggleTheme} aria-label="Alternar tema" title="Alternar tema">
-          {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
-        {authProfile ? (
-          <div className="relative flex items-center gap-2">
-            <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={openSupport} aria-label="Suporte" title="Suporte">
-              <Headset size={18} />
-            </button>
-            <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={openSettings} aria-label="Configurações" title="Configurações">
-              <Settings size={18} />
-            </button>
-            <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={() => setOpen((current) => !current)} aria-label="Notificações" title="Notificações">
-              <Bell size={18} />
-            </button>
-            <button
-              type="button"
-              className="brand-icon-button"
-              onClick={() => setOpen((current) => !current)}
-              aria-label="Abrir menu do usuário"
-              title="Perfil"
-            >
-              <User size={19} />
-            </button>
-            {open ? (
-              <div className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-ink/10">
-                <div className="border-b border-ink/10 px-4 py-3 text-sm">
-                  <p className="font-black">{authProfile.full_name || 'Usuário'}</p>
-                  <p className="truncate text-xs text-ink/55">{authProfile.email}</p>
-                </div>
-                {menuItems.map(([label, action, Icon]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-mist"
-                    onClick={() => {
-                      action();
-                      setOpen(false);
-                    }}
-                  >
-                    <Icon size={17} className="text-leaf" />
-                    {label}
-                  </button>
-                ))}
-                <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-mist" onClick={() => onNavigate('/casas')}>
-                  <Home size={17} className="text-leaf" />
-                  Ver hospedagens
-                </button>
-                <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-red-700 hover:bg-red-50" onClick={onSignOut}>
-                  <LogOut size={17} />
-                  Sair
-                </button>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" className="px-3 sm:px-5" onClick={() => onAuth?.('login') || onNavigate('/login')}>
-              <Lock size={17} />
-              Login
-            </Button>
-            <Button type="button" className="hidden sm:inline-flex" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
-              <UserPlus size={17} />
-              Cadastrar
-            </Button>
-          </div>
-        )}
-      </div>
-    </header>
+    <NavbarShell
+      transparent={transparent}
+      brand={brand}
+      nav={navigation}
+      themeToggle={themeToggle}
+      account={account}
+    />
   );
 }
-
 function SiteFooter({ onNavigate }) {
   return (
     <footer className="border-t border-ink/10 bg-ink px-4 py-8 text-white">
@@ -5921,10 +5911,12 @@ function AdminPanel({
     doc.save(`${property.name}-${reportType}.pdf`.replace(/\s+/g, '-').toLowerCase());
   }
 
-  const ownerPanelBlocked =
-    adminUnlocked &&
-    normalizeRole(authProfile?.role) !== 'super_admin' &&
-    (!propertyLicense || !isLicenseAccessValid(propertyLicense));
+  const ownerAccessState = getOwnerPanelAccessState({
+    role: normalizeRole(authProfile?.role),
+    license: propertyLicense,
+    licenseIsValid: propertyLicense ? isLicenseAccessValid(propertyLicense) : false,
+  });
+  const ownerPanelBlocked = adminUnlocked && ownerAccessState.blocked;
   const licenseWarningText =
     normalizeRole(authProfile?.role) === 'proprietario' && propertyLicense && isLicenseAccessValid(propertyLicense)
       ? buildLicenseWarningText(propertyLicense)

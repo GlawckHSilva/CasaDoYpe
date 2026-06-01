@@ -11,6 +11,12 @@ export default class ErrorBoundary extends React.Component {
     return { error };
   }
 
+  componentDidUpdate(previousProps) {
+    if (this.state.error && previousProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+
   componentDidCatch(error, info) {
     if (import.meta.env.DEV) {
       console.error('Hospedex page error', error, info);
