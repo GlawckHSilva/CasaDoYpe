@@ -79,7 +79,7 @@ import { hasSupabaseConfig, supabase, supabaseConfig } from './services/supabase
 import { canUseDemoFallback, getInitialThemeMode, readLocalData, writeLocalData } from './services/storageService.js';
 import { createPropertyRecord, deletePropertyRecord, updatePropertyRecord } from './services/propertyService.js';
 import { createReservationRecord } from './services/reservationService.js';
-import { deleteLicenseRecord, getOwnerPanelAccessState, upsertLicenseRecord } from './services/licenseService.js';
+import { deleteLicenseRecord, getOwnerPanelAccessState, getOwnerPropertyLimitState, upsertLicenseRecord } from './services/licenseService.js';
 import NavbarShell from './components/Navbar.jsx';
 import UserMenu from './components/UserMenu.jsx';
 import HomePage from './pages/Home.jsx';
@@ -1519,11 +1519,31 @@ export default function App() {
   }
 
   async function addProperty(propertyDraft) {
+    const role = normalizeRole(authProfile?.role);
+    const ownerId = propertyDraft.owner_id || (role === 'proprietario' ? authProfile?.id : null);
+    const ownerLicense = getLatestOwnerLicense(licenses, ownerId);
+    const limitState = getOwnerPropertyLimitState({
+      role,
+      license: ownerLicense,
+      licenseIsValid: ownerLicense ? isLicenseAccessValid(ownerLicense) : false,
+      properties,
+      ownerId,
+    });
+
+    if (!limitState.canCreate) {
+      setMessage(
+        limitState.reason === 'limit_reached'
+          ? 'Você atingiu o limite de casas da sua licença.'
+          : 'Licença ativa necessária para cadastrar casas.',
+      );
+      return false;
+    }
+
     const propertyPayload = ensurePropertySlug({
       ...emptyProperty,
       ...propertyDraft,
       id: crypto.randomUUID(),
-      owner_id: propertyDraft.owner_id || (normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : null),
+      owner_id: ownerId,
       daily_rate: Number(propertyDraft.daily_rate || 0),
       cleaning_fee: Number(propertyDraft.cleaning_fee || 0),
       max_guests: Number(propertyDraft.max_guests || 1),
@@ -1544,15 +1564,20 @@ export default function App() {
     if (hasSupabaseConfig) {
       try {
         createdProperty = await createPropertyRecord(supabase, propertyPayload);
-      } catch {
-        setMessage('Não foi possível cadastrar a casa agora.');
-        return;
+      } catch (error) {
+        setMessage(
+          /limite|limit/i.test(error?.message || '')
+            ? 'Você atingiu o limite de casas da sua licença.'
+            : 'Não foi possível cadastrar a casa agora.',
+        );
+        return false;
       }
     }
 
     setProperties((current) => [...current, createdProperty]);
     setSelectedPropertyId(createdProperty.id);
     setMessage('Casa cadastrada. Agora adicione fotos e ajuste os dados.');
+    return true;
   }
 
   async function deleteProperty(propertyId) {
@@ -5290,6 +5315,17 @@ function AdminPanel({
     occupancy: 'Ocupação e desempenho',
     guests: 'Hóspedes',
   };
+  const ownerPropertyLimitState = getOwnerPropertyLimitState({
+    role: normalizeRole(authProfile?.role),
+    license: propertyLicense,
+    licenseIsValid: propertyLicense ? isLicenseAccessValid(propertyLicense) : false,
+    properties,
+    ownerId: authProfile?.id,
+  });
+  const ownerReachedPropertyLimit = ownerPropertyLimitState.reason === 'limit_reached';
+  const ownerPropertyLimitMessage = ownerReachedPropertyLimit
+    ? 'Você atingiu o limite de casas da sua licença.'
+    : `Casas liberadas: ${ownerPropertyLimitState.currentProperties}/${ownerPropertyLimitState.propertyLimit}.`;
 
   useEffect(() => {
     setAdminView(initialView || 'dashboard');
@@ -5430,9 +5466,9 @@ function AdminPanel({
     });
   }
 
-  function submitNewProperty(event) {
+  async function submitNewProperty(event) {
     event.preventDefault();
-    addProperty({
+    const created = await addProperty({
       ...newProperty,
       daily_rate: Number(newProperty.daily_rate),
       cleaning_fee: Number(newProperty.cleaning_fee),
@@ -5442,6 +5478,7 @@ function AdminPanel({
       amenities: parseAdminList(newProperty.amenities),
       rules: parseAdminList(newProperty.rules),
     });
+    if (!created) return;
     setNewProperty({
       ...emptyProperty,
       name: '',
@@ -5480,6 +5517,17 @@ function AdminPanel({
   }
 
   function startNewProperty() {
+    if (!ownerPropertyLimitState.canCreate) {
+      setAdminNotice(
+        ownerReachedPropertyLimit
+          ? 'Você atingiu o limite de casas da sua licença.'
+          : 'Licença ativa necessária para cadastrar casas.',
+      );
+      setShowNewProperty(false);
+      return;
+    }
+
+    setAdminNotice('');
     setNewProperty({
       ...emptyProperty,
       name: '',
@@ -6190,6 +6238,12 @@ function AdminPanel({
                 </button>
               </div>
               {copyNotice ? <p className="rounded-md bg-leaf/10 px-3 py-2 text-sm font-bold text-leaf">{copyNotice}</p> : null}
+              {adminNotice && adminView === 'houses' ? <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{adminNotice}</p> : null}
+              {normalizeRole(authProfile?.role) === 'proprietario' ? (
+                <p className={`rounded-md px-3 py-2 text-sm font-bold ${ownerReachedPropertyLimit ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+                  {ownerPropertyLimitMessage}
+                </p>
+              ) : null}
               <div className="grid gap-2">
                 {properties.map((item) => (
                   <div
