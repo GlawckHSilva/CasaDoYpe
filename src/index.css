@@ -33,6 +33,12 @@ body {
     #f6f8fb;
 }
 
+.dark body {
+  background:
+    linear-gradient(180deg, rgba(56, 189, 248, 0.08), transparent 280px),
+    #020617;
+}
+
 #fotos,
 #calendario,
 #reserva,
@@ -84,6 +90,12 @@ textarea {
   box-shadow: 0 16px 36px rgba(16, 32, 51, 0.08);
 }
 
+.dark .brand-card {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.24);
+}
+
 .brand-card-hover {
   transition:
     transform 180ms ease,
@@ -113,10 +125,64 @@ textarea {
     color 180ms ease;
 }
 
+.dark .brand-icon-button {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+}
+
 .brand-icon-button:hover {
   transform: translateY(-1px);
   border-color: rgba(10, 102, 194, 0.28);
   color: #0a66c2;
+}
+
+.dark .brand-icon-button:hover {
+  border-color: rgba(125, 211, 252, 0.45);
+  color: #7dd3fc;
+}
+
+.dark .bg-\[\#f4f8ff\],
+.dark .bg-\[\#f6f8fb\],
+.dark .bg-\[\#f8fbff\],
+.dark .bg-mist {
+  background-color: #020617 !important;
+}
+
+.dark .bg-white {
+  background-color: #0f172a !important;
+}
+
+.dark .text-ink,
+.dark [class*="text-ink/"] {
+  color: #f8fafc !important;
+}
+
+.dark .border-ink\/10,
+.dark .border-ink\/15,
+.dark .border-ink\/20,
+.dark .ring-ink\/10 {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  --tw-ring-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: rgba(248, 250, 252, 0.42) !important;
+}
+
+.dark .shadow-sm,
+.dark .shadow-soft {
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28) !important;
 }
 
 .brand-kicker {

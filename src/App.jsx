@@ -73,7 +73,14 @@ import {
 import { ptBR } from 'date-fns/locale';
 import { jsPDF } from 'jspdf';
 import { demoPhotos, demoProperties, demoProperty, demoReservations } from './data/demo';
-import { hasSupabaseConfig, supabase, supabaseConfig } from './lib/supabase';
+import AuthGuard from './components/AuthGuard.jsx';
+import LoadingState from './components/LoadingState.jsx';
+import { roleHomePath as getRoleHomePath, canAccessRoute } from './routes/authRoutes.js';
+import { hasSupabaseConfig, supabase, supabaseConfig } from './services/supabaseClient.js';
+import { canUseDemoFallback, getInitialThemeMode, readLocalData, writeLocalData } from './services/storageService.js';
+import { createPropertyRecord, deletePropertyRecord, updatePropertyRecord } from './services/propertyService.js';
+import { createReservationRecord } from './services/reservationService.js';
+import { deleteLicenseRecord, upsertLicenseRecord } from './services/licenseService.js';
 
 const currency = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -103,12 +110,13 @@ const socialLinks = {
   email: `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(commercialEmail)}`,
   twitter: import.meta.env.VITE_SOCIAL_X || 'https://x.com/hospedex',
 };
+const useDemoFallback = canUseDemoFallback(hasSupabaseConfig);
 const brandAssets = {
-  horizontal: '/brand/hospedex-logo-horizontal.svg',
-  vertical: '/brand/hospedex-logo-vertical.svg',
-  mark: '/brand/hospedex-mark.svg',
-  white: '/brand/hospedex-logo-white.svg',
-  blue: '/brand/hospedex-logo-blue.svg',
+  horizontal: '/brand/hospedex-logo.png',
+  vertical: '/brand/hospedex-logo.png',
+  mark: '/brand/hospedex-logo.png',
+  white: '/brand/hospedex-logo.png',
+  blue: '/brand/hospedex-logo.png',
 };
 const panelIconMap = {
   dashboard: BarChart3,
@@ -408,21 +416,6 @@ function getPrimaryPhoto(property, photos) {
   );
 }
 
-function readLocalData(key, fallback) {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const stored = window.localStorage.getItem(`casa-do-ype:${key}`);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeLocalData(key, value) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(`casa-do-ype:${key}`, JSON.stringify(value));
-}
-
 async function safeSupabaseQuery(query, timeoutMs = 12000, timeoutMessage = 'Consulta inicial excedeu o tempo limite.') {
   let timerId;
   const timeout = new Promise((resolve) => {
@@ -642,10 +635,7 @@ function getAuthRole(profile, email) {
 }
 
 function roleHomePath(role) {
-  const normalizedRole = normalizeRole(role);
-  if (normalizedRole === 'super_admin') return '/super-admin';
-  if (normalizedRole === 'proprietario') return '/admin';
-  return '/hospede';
+  return getRoleHomePath(normalizeRole(role));
 }
 
 function calculateCardInstallment(total, installments, interestRates) {
@@ -771,14 +761,14 @@ function PanelIcon({ icon, className = '', size = 18 }) {
 }
 
 function BrandLogo({ variant = 'horizontal', className = 'h-10 w-auto', alt = 'Hospedex' }) {
-  return <img className={className} src={brandAssets[variant] || brandAssets.horizontal} alt={alt} />;
+  return <img className={`aspect-square object-contain ${className}`} src={brandAssets[variant] || brandAssets.horizontal} alt={alt} />;
 }
 
 function LoadingScreen({ label = 'Carregando Hospedex...' }) {
   return (
     <div className="grid min-h-screen place-items-center bg-[#f6f8fb] p-6 text-ink">
       <div className="grid justify-items-center gap-4 text-center">
-        <BrandLogo variant="vertical" className="h-40 w-auto" />
+        <BrandLogo variant="vertical" className="h-40 w-40 rounded-2xl shadow-soft" />
         <div className="h-1.5 w-44 overflow-hidden rounded-full bg-blue-100">
           <span className="block h-full w-1/2 animate-pulse rounded-full bg-leaf" />
         </div>
@@ -847,20 +837,20 @@ function SelectInput({ children, ...props }) {
 }
 
 export default function App() {
-  const [properties, setProperties] = useState(() => (hasSupabaseConfig ? [] : readLocalData('properties', demoProperties)));
-  const [selectedPropertyId, setSelectedPropertyId] = useState(() => (hasSupabaseConfig ? '' : readLocalData('selectedPropertyId', demoProperty.id)));
-  const [photos, setPhotos] = useState(() => (hasSupabaseConfig ? [] : readLocalData('photos', demoPhotos)));
-  const [reservations, setReservations] = useState(() => (hasSupabaseConfig ? [] : readLocalData('reservations', demoReservations)));
-  const [cashMovements, setCashMovements] = useState(() => readLocalData('cashMovements', []));
-  const [suggestions, setSuggestions] = useState(() => readLocalData('suggestions', []));
-  const [supportTickets, setSupportTickets] = useState(() => readLocalData('supportTickets', []));
-  const [homeBanners, setHomeBanners] = useState(() => readLocalData('homeBanners', []));
-  const [adminLogs, setAdminLogs] = useState(() => readLocalData('adminLogs', []));
-  const [interestRates, setInterestRates] = useState(() => readLocalData('interestRates', defaultInterestRates));
-  const [profiles, setProfiles] = useState(() => readLocalData('profiles', []));
-  const [licenses, setLicenses] = useState(() => readLocalData('licenses', []));
-  const [licenseHistory, setLicenseHistory] = useState(() => readLocalData('licenseHistory', []));
-  const [paymentSettings, setPaymentSettings] = useState(() => readLocalData('paymentSettings', []));
+  const [properties, setProperties] = useState(() => (useDemoFallback ? readLocalData('properties', demoProperties) : []));
+  const [selectedPropertyId, setSelectedPropertyId] = useState(() => (useDemoFallback ? readLocalData('selectedPropertyId', demoProperty.id) : ''));
+  const [photos, setPhotos] = useState(() => (useDemoFallback ? readLocalData('photos', demoPhotos) : []));
+  const [reservations, setReservations] = useState(() => (useDemoFallback ? readLocalData('reservations', demoReservations) : []));
+  const [cashMovements, setCashMovements] = useState(() => (useDemoFallback ? readLocalData('cashMovements', []) : []));
+  const [suggestions, setSuggestions] = useState(() => (useDemoFallback ? readLocalData('suggestions', []) : []));
+  const [supportTickets, setSupportTickets] = useState(() => (useDemoFallback ? readLocalData('supportTickets', []) : []));
+  const [homeBanners, setHomeBanners] = useState(() => (useDemoFallback ? readLocalData('homeBanners', []) : []));
+  const [adminLogs, setAdminLogs] = useState(() => (useDemoFallback ? readLocalData('adminLogs', []) : []));
+  const [interestRates, setInterestRates] = useState(() => (useDemoFallback ? readLocalData('interestRates', defaultInterestRates) : defaultInterestRates));
+  const [profiles, setProfiles] = useState(() => (useDemoFallback ? readLocalData('profiles', []) : []));
+  const [licenses, setLicenses] = useState(() => (useDemoFallback ? readLocalData('licenses', []) : []));
+  const [licenseHistory, setLicenseHistory] = useState(() => (useDemoFallback ? readLocalData('licenseHistory', []) : []));
+  const [paymentSettings, setPaymentSettings] = useState(() => (useDemoFallback ? readLocalData('paymentSettings', []) : []));
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [heroPhotoIndex, setHeroPhotoIndex] = useState(0);
   const [route, setRoute] = useState(() => (typeof window === 'undefined' ? '/' : window.location.pathname || '/'));
@@ -878,7 +868,7 @@ export default function App() {
   const [superAdminInitialView, setSuperAdminInitialView] = useState('dashboard');
   const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(() => isPasswordRecoveryUrl());
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
-  const [themeMode, setThemeMode] = useState(() => readLocalData('themeMode', 'light'));
+  const [themeMode, setThemeMode] = useState(getInitialThemeMode);
   const [message, setMessage] = useState('');
   const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('');
   const [propertyTransitionKey, setPropertyTransitionKey] = useState(0);
@@ -1211,78 +1201,79 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('properties', properties);
   }, [properties]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('selectedPropertyId', selectedPropertyId);
   }, [selectedPropertyId]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('photos', photos);
   }, [photos]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('reservations', reservations);
   }, [reservations]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('cashMovements', cashMovements);
   }, [cashMovements]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('suggestions', suggestions);
   }, [suggestions]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('supportTickets', supportTickets);
   }, [supportTickets]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('homeBanners', homeBanners);
   }, [homeBanners]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('adminLogs', adminLogs);
   }, [adminLogs]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('interestRates', interestRates);
   }, [interestRates]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('profiles', profiles);
   }, [profiles]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('licenses', licenses);
   }, [licenses]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('licenseHistory', licenseHistory);
   }, [licenseHistory]);
 
   useEffect(() => {
-    if (hasSupabaseConfig) return;
+    if (!useDemoFallback) return;
     writeLocalData('paymentSettings', paymentSettings);
   }, [paymentSettings]);
 
   useEffect(() => {
     writeLocalData('themeMode', themeMode);
     document.documentElement.classList.toggle('dark', themeMode === 'dark');
+    document.documentElement.style.colorScheme = themeMode;
   }, [themeMode]);
 
   useEffect(() => {
@@ -1337,20 +1328,15 @@ export default function App() {
   useEffect(() => {
     if (!authChecked) return;
     const protectedRoutes = ['/super-admin', '/admin', '/hospede'];
-    if (protectedRoutes.includes(route) && !authProfile) {
-      navigateTo('/login');
+    if (!protectedRoutes.includes(route)) return;
+    if (!authProfile) {
+      if (route !== '/login') navigateTo('/login');
       return;
     }
-    if (route === '/super-admin' && normalizeRole(authProfile?.role) !== 'super_admin') {
-      navigateTo(roleHomePath(authProfile?.role));
+    if (!canAccessRoute(route, authProfile)) {
+      const nextPath = roleHomePath(authProfile?.role);
+      if (nextPath !== route) navigateTo(nextPath);
       return;
-    }
-    if (route === '/admin' && !['proprietario', 'super_admin'].includes(normalizeRole(authProfile?.role))) {
-      navigateTo(roleHomePath(authProfile?.role));
-      return;
-    }
-    if (route === '/hospede' && !['hospede', 'super_admin'].includes(normalizeRole(authProfile?.role))) {
-      navigateTo(roleHomePath(authProfile?.role));
     }
   }, [route, authProfile, authChecked]);
 
@@ -1416,13 +1402,13 @@ export default function App() {
     let createdReservation = reservation;
 
     if (hasSupabaseConfig) {
-      const { data, error } = await supabase.from('reservations').insert(reservation).select().maybeSingle();
-      if (error) {
+      try {
+        createdReservation = await createReservationRecord(supabase, reservation);
+        setReservations((current) => [...current, createdReservation]);
+      } catch {
         setMessage('Não foi possível criar a reserva agora. Confira os dados e tente novamente.');
         return;
       }
-      createdReservation = data;
-      setReservations((current) => [...current, data]);
     } else {
       const localReservation = { ...reservation, id: crypto.randomUUID() };
       createdReservation = localReservation;
@@ -1457,19 +1443,23 @@ export default function App() {
     const nextProfile = { ...authProfile, ...updates };
     setAuthProfile(nextProfile);
     if (hasSupabaseConfig) {
-      await supabase
-        .from('profiles')
-        .update({
-          full_name: nextProfile.full_name,
-          phone: nextProfile.phone,
-        })
-        .eq('id', authProfile.id);
-      await supabase.auth.updateUser({
-        data: {
-          full_name: nextProfile.full_name,
-          phone: nextProfile.phone,
-        },
-      });
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            full_name: nextProfile.full_name,
+            phone: nextProfile.phone,
+          })
+          .eq('id', authProfile.id);
+        await supabase.auth.updateUser({
+          data: {
+            full_name: nextProfile.full_name,
+            phone: nextProfile.phone,
+          },
+        });
+      } catch {
+        setAuthProfile(authProfile);
+      }
     }
   }
 
@@ -1494,15 +1484,20 @@ export default function App() {
   async function saveProperty(updated) {
     const normalized = ensurePropertySlug({
       ...updated,
+      owner_id: updated.owner_id || (normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : updated.owner_id),
+      owner_email: updated.owner_email || (normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.email : fallbackOwnerEmail),
       maps_url: normalizeExternalUrl(updated.maps_url),
     }, properties);
 
     setProperties((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
     if (hasSupabaseConfig) {
-      let query = supabase.from('properties').update(normalized).eq('id', normalized.id);
-      if (normalizeRole(authProfile?.role) === 'proprietario') query = query.eq('owner_id', authProfile.id);
-      const { error } = await query;
-      if (error) {
+      try {
+        await updatePropertyRecord(
+          supabase,
+          normalized,
+          normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : null,
+        );
+      } catch {
         setMessage('Nao foi possivel salvar a casa agora.');
         return;
       }
@@ -1527,7 +1522,7 @@ export default function App() {
       bedrooms: Number(propertyDraft.bedrooms || 1),
       bathrooms: Number(propertyDraft.bathrooms || 1),
       owner_whatsapp: propertyDraft.owner_whatsapp || fallbackOwnerWhatsapp,
-      owner_email: propertyDraft.owner_email || fallbackOwnerEmail,
+      owner_email: propertyDraft.owner_email || authProfile?.email || fallbackOwnerEmail,
       maps_url: normalizeExternalUrl(propertyDraft.maps_url),
       active: propertyDraft.active !== false,
       license_key: propertyDraft.license_key || '',
@@ -1539,13 +1534,12 @@ export default function App() {
 
     let createdProperty = propertyPayload;
     if (hasSupabaseConfig) {
-      const { id, ...insertable } = propertyPayload;
-      const { data, error } = await supabase.from('properties').insert(insertable).select().maybeSingle();
-      if (error) {
+      try {
+        createdProperty = await createPropertyRecord(supabase, propertyPayload);
+      } catch {
         setMessage('Não foi possível cadastrar a casa agora.');
         return;
       }
-      createdProperty = data;
     }
 
     setProperties((current) => [...current, createdProperty]);
@@ -1562,10 +1556,13 @@ export default function App() {
     setCashMovements((current) => current.filter((movement) => movement.property_id !== propertyId));
     if (selectedPropertyId === propertyId) setSelectedPropertyId(nextProperties[0]?.id || '');
     if (hasSupabaseConfig) {
-      let query = supabase.from('properties').delete().eq('id', propertyId);
-      if (normalizeRole(authProfile?.role) === 'proprietario') query = query.eq('owner_id', authProfile.id);
-      const { error } = await query;
-      if (error) {
+      try {
+        await deletePropertyRecord(
+          supabase,
+          propertyId,
+          normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : null,
+        );
+      } catch {
         setMessage('Nao foi possivel excluir a casa agora.');
         await loadSupabaseData();
         return;
@@ -1676,12 +1673,12 @@ export default function App() {
     }
     let created = { ...reservation, id: crypto.randomUUID() };
     if (hasSupabaseConfig) {
-      const { data, error } = await supabase.from('reservations').insert(reservation).select().maybeSingle();
-      if (error) {
+      try {
+        created = await createReservationRecord(supabase, reservation);
+      } catch {
         setMessage('Não foi possível criar a reserva manual agora.');
         return false;
       }
-      created = data;
     }
     setReservations((current) => [...current, created]);
     if (Number(created.total_amount || 0) > 0 && !['blocked', 'maintenance'].includes(created.status)) {
@@ -1877,8 +1874,13 @@ export default function App() {
     setAdminSession(null);
     setAuthProfile(null);
     setAdminUnlocked(false);
+    setAdminOpen(false);
     setClientPortalOpen(false);
     navigateTo('/');
+  }
+
+  if (!hasSupabaseConfig && !useDemoFallback) {
+    return <SupabaseConfigError />;
   }
 
   if (route === '/login') {
@@ -1892,7 +1894,7 @@ export default function App() {
             setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
             setAdminOpen(false);
             setClientPortalOpen(false);
-            navigateTo('/');
+            navigateTo(roleHomePath(profile.role));
           }}
           resolveAuthProfile={resolveAuthProfile}
         />
@@ -1922,43 +1924,83 @@ export default function App() {
   }
 
   if (route === '/super-admin') {
+    return (
+      <AuthGuard
+        loading={!authChecked}
+        authenticated={Boolean(authProfile)}
+        allowed={normalizeRole(authProfile?.role) === 'super_admin'}
+        unauthenticatedFallback={
+          <AccessDenied
+            title="Login necessário"
+            text="Entre para acessar a área de Super Admin."
+            onLogin={() => navigateTo('/login')}
+            onHome={() => navigateTo('/')}
+          />
+        }
+        deniedFallback={
+          <AccessDenied
+            title="Acesso restrito"
+            text="A área de Super Admin é privada e exige permissão super_admin."
+            onLogin={() => navigateTo('/login')}
+            onHome={() => navigateTo('/')}
+          />
+        }
+      >
+        <SuperAdminDashboard
+          profiles={profiles}
+          properties={properties}
+          reservations={reservations}
+          cashMovements={cashMovements}
+          licenses={licenses}
+          setLicenses={setLicenses}
+          licenseHistory={licenseHistory}
+          suggestions={suggestions}
+          setLicenseHistory={setLicenseHistory}
+          setProfiles={setProfiles}
+          setProperties={setProperties}
+          authProfile={authProfile}
+          supportTickets={supportTickets}
+          onSignOut={signOut}
+          onHome={() => navigateTo('/')}
+          onRefresh={loadSupabaseData}
+          addAdminLog={addAdminLog}
+          homeBanners={homeBanners}
+          setHomeBanners={setHomeBanners}
+          initialView={superAdminInitialView}
+        />
+      </AuthGuard>
+    );
+  }
+
+  if (route === '/admin' || route === '/hospede') {
+    const targetLabel = route === '/admin' ? 'painel do proprietário' : 'portal do hóspede';
+    const fallbackText = `Entre para acessar o ${targetLabel}.`;
+
     if (!authChecked) {
-      return <div className="grid min-h-screen place-items-center bg-[#f4f8ff] font-bold text-ink">Validando acesso...</div>;
+      return <LoadingState label="Validando acesso..." />;
     }
-    if (normalizeRole(authProfile?.role) !== 'super_admin') {
+
+    if (!authProfile) {
       return (
         <AccessDenied
-          title="Acesso restrito"
-          text="A área de Super Admin é privada e exige permissão super_admin."
+          title="Login necessário"
+          text={fallbackText}
           onLogin={() => navigateTo('/login')}
           onHome={() => navigateTo('/')}
         />
       );
     }
-    return (
-      <SuperAdminDashboard
-        profiles={profiles}
-        properties={properties}
-        reservations={reservations}
-        cashMovements={cashMovements}
-        licenses={licenses}
-        setLicenses={setLicenses}
-        licenseHistory={licenseHistory}
-        suggestions={suggestions}
-        setLicenseHistory={setLicenseHistory}
-        setProfiles={setProfiles}
-        setProperties={setProperties}
-        authProfile={authProfile}
-        supportTickets={supportTickets}
-        onSignOut={signOut}
-        onHome={() => navigateTo('/')}
-        onRefresh={loadSupabaseData}
-        addAdminLog={addAdminLog}
-        homeBanners={homeBanners}
-        setHomeBanners={setHomeBanners}
-        initialView={superAdminInitialView}
-      />
-    );
+
+    if (!canAccessRoute(route, authProfile)) {
+      return (
+        <AccessDenied
+          title="Acesso restrito"
+          text="Seu perfil foi carregado, mas não tem permissão para esta área."
+          onLogin={() => navigateTo(roleHomePath(authProfile.role))}
+          onHome={() => navigateTo('/')}
+        />
+      );
+    }
   }
 
   if (route === '/') {
@@ -1975,6 +2017,8 @@ export default function App() {
         onOpenClient={openClientSection}
         onOpenSuperAdmin={openSuperAdminSection}
         onSignOut={signOut}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
     );
   }
@@ -1992,6 +2036,8 @@ export default function App() {
         onOpenClient={openClientSection}
         onOpenSuperAdmin={openSuperAdminSection}
         onSignOut={signOut}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
     );
   }
@@ -2006,6 +2052,8 @@ export default function App() {
         onOpenClient={openClientSection}
         onOpenSuperAdmin={openSuperAdminSection}
         onSignOut={signOut}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
     );
   }
@@ -2020,6 +2068,8 @@ export default function App() {
         onOpenClient={openClientSection}
         onOpenSuperAdmin={openSuperAdminSection}
         onSignOut={signOut}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
     );
   }
@@ -2509,14 +2559,14 @@ export default function App() {
       <footer className="border-t border-ink/10 bg-ink px-4 py-8 text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <BrandLogo variant="white" className="h-10 w-auto max-w-[220px]" />
+            <BrandLogo variant="white" className="h-16 w-16 rounded-xl" />
             <p className="mt-2 text-sm font-semibold text-white/80">{property.name}</p>
           </div>
           <p className="text-sm text-white/70">Reservas, calendário e check-in online.</p>
         </div>
       </footer>
 
-      {adminOpen ? (
+      {adminOpen || (route === '/admin' && canAccessRoute('/admin', authProfile)) ? (
         <AdminPanel
           addProperty={addProperty}
           addPhoto={addPhoto}
@@ -2524,7 +2574,10 @@ export default function App() {
           adminSession={adminSession}
           deleteProperty={deleteProperty}
           deletePhoto={deletePhoto}
-          onClose={() => setAdminOpen(false)}
+          onClose={() => {
+            setAdminOpen(false);
+            if (route === '/admin') navigateTo('/');
+          }}
           onUnlock={() => setAdminUnlocked(true)}
           onSelectProperty={selectProperty}
           properties={adminProperties}
@@ -2566,7 +2619,7 @@ export default function App() {
             setAuthOpen(false);
             setAdminOpen(false);
             setClientPortalOpen(false);
-            navigateTo('/');
+            navigateTo(roleHomePath(profile.role));
           }}
           resolveAuthProfile={resolveAuthProfile}
         />
@@ -2576,7 +2629,7 @@ export default function App() {
         <PasswordRecoveryModal onClose={() => setPasswordRecoveryOpen(false)} />
       ) : null}
 
-      {clientPortalOpen ? (
+      {clientPortalOpen || (route === '/hospede' && canAccessRoute('/hospede', authProfile)) ? (
         <ClientPortal
           authProfile={authProfile}
           reservations={reservations}
@@ -2585,7 +2638,10 @@ export default function App() {
           voucherSummary={getVoucherSummary(
             reservations.filter((reservation) => reservation.guest_email === authProfile?.email),
           )}
-          onClose={() => setClientPortalOpen(false)}
+          onClose={() => {
+            setClientPortalOpen(false);
+            if (route === '/hospede') navigateTo('/');
+          }}
           onSignOut={signOut}
           initialView={clientPortalInitialView}
         />
@@ -2625,6 +2681,8 @@ function PublicTopBar({
   onOpenSuperAdmin,
   onSignOut,
   transparent = false,
+  themeMode = 'light',
+  onToggleTheme,
 }) {
   const [open, setOpen] = useState(false);
   const role = normalizeRole(authProfile?.role);
@@ -2670,7 +2728,7 @@ function PublicTopBar({
     <header className={`sticky top-0 z-30 border-b backdrop-blur ${transparent ? 'border-white/15 bg-ink/75 text-white' : 'border-ink/10 bg-white/95 text-ink shadow-sm'}`}>
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <button type="button" className="flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
-          <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-10 w-auto max-w-[168px] sm:max-w-[204px]" />
+          <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-11 w-11 rounded-md shadow-sm" />
         </button>
         <nav className="hidden items-center gap-5 text-sm font-bold md:flex">
           <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>
@@ -2695,6 +2753,9 @@ function PublicTopBar({
             <Twitter size={18} />
           </a>
         </nav>
+        <button type="button" className="brand-icon-button" onClick={onToggleTheme} aria-label="Alternar tema" title="Alternar tema">
+          {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
         {authProfile ? (
           <div className="relative flex items-center gap-2">
             <button type="button" className="brand-icon-button hidden sm:inline-grid" onClick={openSupport} aria-label="Suporte" title="Suporte">
@@ -2768,7 +2829,7 @@ function SiteFooter({ onNavigate }) {
     <footer className="border-t border-ink/10 bg-ink px-4 py-8 text-white">
       <div className="mx-auto grid max-w-7xl gap-6 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
-          <BrandLogo variant="white" className="h-11 w-auto max-w-[220px]" />
+          <BrandLogo variant="white" className="h-16 w-16 rounded-xl" />
           <p className="mt-3 max-w-xl text-sm leading-6 text-white/70">
             Plataforma para turismo, hospedagem e aluguel por temporada com reservas, calendario e gestao de propriedades.
           </p>
@@ -2902,6 +2963,8 @@ function MarketingHome({
   onOpenClient,
   onOpenSuperAdmin,
   onSignOut,
+  themeMode,
+  onToggleTheme,
 }) {
   const [query, setQuery] = useState('');
   const [city, setCity] = useState('');
@@ -2932,6 +2995,8 @@ function MarketingHome({
         onOpenClient={onOpenClient}
         onOpenSuperAdmin={onOpenSuperAdmin}
         onSignOut={onSignOut}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
       />
       <main>
         <section className="relative overflow-hidden bg-ink text-white">
@@ -3030,6 +3095,8 @@ function HousesListingPage({
   onOpenClient,
   onOpenSuperAdmin,
   onSignOut,
+  themeMode,
+  onToggleTheme,
 }) {
   const [query, setQuery] = useState('');
   const [city, setCity] = useState('');
@@ -3046,6 +3113,8 @@ function HousesListingPage({
         onOpenClient={onOpenClient}
         onOpenSuperAdmin={onOpenSuperAdmin}
         onSignOut={onSignOut}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
       />
       <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="mb-6">
@@ -3072,7 +3141,7 @@ function HousesListingPage({
   );
 }
 
-function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut }) {
+function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut, themeMode, onToggleTheme }) {
   return (
     <div className="min-h-screen bg-[#f4f8ff] text-ink">
       <PublicTopBar
@@ -3083,6 +3152,8 @@ function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient,
         onOpenClient={onOpenClient}
         onOpenSuperAdmin={onOpenSuperAdmin}
         onSignOut={onSignOut}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
       />
       <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="max-w-3xl">
@@ -3139,7 +3210,7 @@ function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient,
   );
 }
 
-function AboutPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut }) {
+function AboutPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut, themeMode, onToggleTheme }) {
   const techs = ['React/Vite', 'Tailwind', 'Supabase', 'Vercel'];
   return (
     <div className="min-h-screen bg-[#f4f8ff] text-ink">
@@ -3151,6 +3222,8 @@ function AboutPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient,
         onOpenClient={onOpenClient}
         onOpenSuperAdmin={onOpenSuperAdmin}
         onSignOut={onSignOut}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
       />
       <main className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
         <section className="grid gap-6">
@@ -3238,6 +3311,20 @@ function AccessDenied({ title, text, onLogin, onHome }) {
             Voltar
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SupabaseConfigError() {
+  return (
+    <div className="grid min-h-screen place-items-center bg-[#f6f8fb] p-4 text-ink dark:bg-slate-950 dark:text-white">
+      <div className="w-full max-w-lg rounded-md border border-amber-200 bg-white p-6 text-center shadow-soft dark:border-amber-300/30 dark:bg-slate-900">
+        <AlertTriangle className="mx-auto text-amber-600 dark:text-amber-300" size={42} aria-hidden="true" />
+        <h1 className="mt-4 text-2xl font-black">Supabase não configurado.</h1>
+        <p className="mt-2 text-sm leading-6 text-ink/65 dark:text-white/65">
+          Configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` na Vercel para carregar login, cadastro, reservas e painéis.
+        </p>
       </div>
     </div>
   );
@@ -3508,9 +3595,11 @@ function SuperAdminDashboard({
     };
     let saved = { ...normalized, id: normalized.id || crypto.randomUUID(), created_at: normalized.created_at || new Date().toISOString() };
     if (hasSupabaseConfig) {
-      const { data, error } = await supabase.from('licenses').upsert(normalized).select().maybeSingle();
-      if (error) return;
-      saved = data;
+      try {
+        saved = await upsertLicenseRecord(supabase, normalized);
+      } catch {
+        return;
+      }
     }
     setLicenses((current) => {
       const exists = current.some((item) => item.id === saved.id);
@@ -3547,7 +3636,14 @@ function SuperAdminDashboard({
         ),
       );
     }
-    if (hasSupabaseConfig) await supabase.from('licenses').delete().eq('id', licenseId);
+    if (hasSupabaseConfig) {
+      try {
+        await deleteLicenseRecord(supabase, licenseId);
+      } catch {
+        await onRefresh?.();
+        return;
+      }
+    }
     await addAdminLog('super_admin_license_deleted', { license_id: licenseId });
   }
 
@@ -4304,7 +4400,7 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
           </Button>
         </div>
         <div className="grid justify-items-center gap-2 text-center">
-          <BrandLogo variant="vertical" className="h-28 w-auto" />
+          <BrandLogo variant="vertical" className="h-28 w-28 rounded-2xl shadow-sm" />
           <h2 className="text-xl font-black">{mode === 'login' ? 'Login' : 'Cadastro'}</h2>
           <p className="max-w-xs text-xs leading-5 text-ink/55">
             {mode === 'login'
@@ -4481,11 +4577,14 @@ function PasswordRecoveryModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-ink/60 p-4 backdrop-blur">
-      <form className="w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft" onSubmit={submit}>
+      <form className="w-full max-w-md rounded-md bg-white p-5 text-ink shadow-soft dark:bg-slate-900 dark:text-white" onSubmit={submit}>
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="flex items-center gap-3">
+            <BrandLogo variant="mark" className="h-14 w-14 rounded-xl shadow-sm" />
+            <div>
             <h2 className="text-2xl font-black">Criar nova senha</h2>
-            <p className="mt-1 text-sm text-ink/65">Defina uma nova senha para acessar sua conta.</p>
+              <p className="mt-1 text-sm text-ink/65 dark:text-white/65">Defina uma nova senha para acessar sua conta.</p>
+            </div>
           </div>
           <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar recuperação">
             <X size={18} />
