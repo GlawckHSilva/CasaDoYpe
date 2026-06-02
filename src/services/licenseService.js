@@ -19,29 +19,31 @@ export function getOwnerPanelAccessState({ role, license, licenseIsValid }) {
 
 export function getOwnerPropertyLimitState({ role, license, licenseIsValid, properties = [], ownerId }) {
   if (role === 'super_admin') {
-    return { canCreate: true, reason: 'super_admin', currentProperties: 0, propertyLimit: Infinity };
+    return { canCreate: true, reason: 'super_admin', currentProperties: 0, propertyLimit: Infinity, remainingProperties: Infinity };
   }
 
   if (role !== 'proprietario') {
-    return { canCreate: false, reason: 'not_owner', currentProperties: 0, propertyLimit: 0 };
+    return { canCreate: false, reason: 'not_owner', currentProperties: 0, propertyLimit: 0, remainingProperties: 0 };
   }
 
   if (!license || !licenseIsValid) {
-    return { canCreate: false, reason: 'invalid_license', currentProperties: 0, propertyLimit: 0 };
+    return { canCreate: false, reason: 'invalid_license', currentProperties: 0, propertyLimit: 0, remainingProperties: 0 };
   }
 
-  const propertyLimit = Math.max(0, Number(license.property_limit || 1));
+  const propertyLimit = Math.max(0, Number(license.property_limit ?? 1));
   const currentProperties = properties.filter((property) => {
     if (!property || property.id === 'empty-owner-property' || property.id === 'empty-property') return false;
     if (property.owner_id !== ownerId) return false;
     if (property.active === false || property.deleted_at) return false;
     return true;
   }).length;
+  const remainingProperties = Math.max(propertyLimit - currentProperties, 0);
 
   return {
     canCreate: currentProperties < propertyLimit,
     reason: currentProperties < propertyLimit ? 'below_limit' : 'limit_reached',
     currentProperties,
     propertyLimit,
+    remainingProperties,
   };
 }

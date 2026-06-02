@@ -1642,6 +1642,72 @@ export default function App() {
     return { ...reservation, payment_url: data.paymentUrl };
   }
 
+  async function getFreshOwnerPropertyLimitState(ownerId, fallbackState = null) {
+    if (!hasSupabaseConfig || !ownerId) {
+      const fallbackLicense = getLatestOwnerLicense(licenses, ownerId);
+      return fallbackState || getOwnerPropertyLimitState({
+        role: normalizeRole(authProfile?.role),
+        license: fallbackLicense,
+        licenseIsValid: fallbackLicense ? isLicenseAccessValid(fallbackLicense) : false,
+        properties,
+        ownerId,
+      });
+    }
+
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const [licenseResult, propertyResult] = await Promise.all([
+      safeSupabaseQuery(
+        supabase
+          .from('licenses')
+          .select('id,property_limit,status,starts_at,expires_at,updated_at,created_at')
+          .eq('owner_id', ownerId)
+          .in('status', ['active', 'trial'])
+          .lte('starts_at', today)
+          .gte('expires_at', today)
+          .order('expires_at', { ascending: false })
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        authRequestTimeoutMs,
+        'Consulta da licenca excedeu o tempo limite.',
+      ),
+      safeSupabaseQuery(
+        supabase.from('properties').select('id,owner_id,active').eq('owner_id', ownerId),
+        authRequestTimeoutMs,
+        'Consulta de casas excedeu o tempo limite.',
+      ),
+    ]);
+
+    if (licenseResult.error) throw licenseResult.error;
+    if (propertyResult.error) throw propertyResult.error;
+
+    const currentProperties = Array.isArray(propertyResult.data)
+      ? propertyResult.data.filter((propertyItem) => propertyItem.active !== false && !propertyItem.deleted_at).length
+      : 0;
+
+    if (!licenseResult.data) {
+      return {
+        canCreate: false,
+        reason: 'invalid_license',
+        currentProperties,
+        propertyLimit: 0,
+        remainingProperties: 0,
+      };
+    }
+
+    const propertyLimit = Math.max(0, Number(licenseResult.data.property_limit ?? 1));
+    const remainingProperties = Math.max(propertyLimit - currentProperties, 0);
+
+    return {
+      canCreate: currentProperties < propertyLimit,
+      reason: currentProperties < propertyLimit ? 'below_limit' : 'limit_reached',
+      currentProperties,
+      propertyLimit,
+      remainingProperties,
+    };
+  }
+
   async function saveProperty(updated) {
     const role = normalizeRole(authProfile?.role);
     if (hasSupabaseConfig && role === 'proprietario' && !authProfile?.id) {
@@ -1688,13 +1754,27 @@ export default function App() {
     }
 
     const ownerLicense = getLatestOwnerLicense(licenses, ownerId);
-    const limitState = getOwnerPropertyLimitState({
+    let limitState = getOwnerPropertyLimitState({
       role,
       license: ownerLicense,
       licenseIsValid: ownerLicense ? isLicenseAccessValid(ownerLicense) : false,
       properties,
       ownerId,
     });
+
+    if (hasSupabaseConfig && role === 'proprietario') {
+      try {
+        limitState = await getFreshOwnerPropertyLimitState(ownerId, limitState);
+      } catch (error) {
+        console.warn('Nao foi possivel validar limite de casas antes do cadastro.', error);
+        limitState = {
+          ...limitState,
+          canCreate: true,
+          reason: 'unverified',
+          remainingProperties: Math.max(Number(limitState.remainingProperties || 0), 1),
+        };
+      }
+    }
 
     if (!limitState.canCreate) {
       setMessage(
@@ -1703,6 +1783,10 @@ export default function App() {
           : 'Licen\u00e7a ativa necess\u00e1ria para cadastrar casas.',
       );
       return false;
+    }
+
+    if (role === 'proprietario' && limitState.reason !== 'unverified') {
+      setMessage(`Voc\u00ea ainda pode cadastrar ${limitState.remainingProperties} casa(s).`);
     }
 
     const propertyPayload = buildPropertyPayload({ ...propertyDraft, id: crypto.randomUUID(), owner_id: ownerId }, authProfile, properties);
@@ -2795,6 +2879,7 @@ export default function App() {
             createPaymentLink={createPaymentLink}
             reorderPhoto={reorderPhoto}
             resolveAuthProfile={resolveAuthProfile}
+            checkOwnerPropertyLimit={() => getFreshOwnerPropertyLimitState(authProfile?.id)}
             registerPayment={registerPayment}
             addCashMovement={addCashMovement}
             saveProperty={saveProperty}
@@ -5346,6 +5431,7 @@ function AdminPanel({
   createPaymentLink,
   reorderPhoto,
   resolveAuthProfile,
+  checkOwnerPropertyLimit,
   onClose,
   onSelectProperty,
   onUnlock,
@@ -5494,9 +5580,15 @@ function AdminPanel({
     ownerId: authProfile?.id,
   });
   const ownerReachedPropertyLimit = ownerPropertyLimitState.reason === 'limit_reached';
+  const ownerRemainingProperties = Math.max(
+    Number(ownerPropertyLimitState.remainingProperties ?? ownerPropertyLimitState.propertyLimit - ownerPropertyLimitState.currentProperties),
+    0,
+  );
   const ownerPropertyLimitMessage = ownerReachedPropertyLimit
     ? 'Você atingiu o limite de casas da sua licença.'
-    : `Casas liberadas: ${ownerPropertyLimitState.currentProperties}/${ownerPropertyLimitState.propertyLimit}.`;
+    : ownerPropertyLimitState.canCreate
+      ? `Você ainda pode cadastrar ${ownerRemainingProperties} casa(s).`
+      : 'Licença ativa necessária para cadastrar casas.';
 
   useEffect(() => {
     setAdminView(initialView || 'dashboard');
@@ -5687,10 +5779,26 @@ function AdminPanel({
     setAdminNotice('Dados do administrador salvos.');
   }
 
-  function startNewProperty() {
-    if (!ownerPropertyLimitState.canCreate) {
+  async function startNewProperty() {
+    let freshLimitState = ownerPropertyLimitState;
+
+    if (normalizeRole(authProfile?.role) === 'proprietario' && checkOwnerPropertyLimit) {
+      try {
+        freshLimitState = await checkOwnerPropertyLimit();
+      } catch (error) {
+        console.warn('Nao foi possivel atualizar limite de casas.', error);
+        freshLimitState = {
+          ...ownerPropertyLimitState,
+          canCreate: true,
+          reason: 'unverified',
+          remainingProperties: Math.max(Number(ownerRemainingProperties || 0), 1),
+        };
+      }
+    }
+
+    if (!freshLimitState.canCreate) {
       setAdminNotice(
-        ownerReachedPropertyLimit
+        freshLimitState.reason === 'limit_reached'
           ? 'Você atingiu o limite de casas da sua licença.'
           : 'Licença ativa necessária para cadastrar casas.',
       );
@@ -5698,7 +5806,11 @@ function AdminPanel({
       return;
     }
 
-    setAdminNotice('');
+    setAdminNotice(
+      freshLimitState.reason === 'unverified'
+        ? ''
+        : `Você ainda pode cadastrar ${freshLimitState.remainingProperties} casa(s).`,
+    );
     setNewProperty({
       ...emptyProperty,
       name: '',
