@@ -521,15 +521,33 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  owner_license public.licenses;
+  current_owner uuid;
 begin
   if public.is_super_admin() then
+    new.active := coalesce(new.active, true);
     return new;
   end if;
 
   if tg_op = 'INSERT' then
-    new.license_key := '';
-    new.license_expires_at := null;
-    new.license_active := false;
+    current_owner := coalesce(new.owner_id, auth.uid());
+
+    select *
+      into owner_license
+      from public.licenses
+      where owner_id = current_owner
+        and status in ('active', 'trial')
+        and starts_at <= current_date
+        and expires_at >= current_date
+      order by expires_at desc, updated_at desc, created_at desc
+      limit 1;
+
+    new.owner_email := coalesce(nullif(new.owner_email, ''), auth.jwt() ->> 'email');
+    new.active := true;
+    new.license_key := coalesce(owner_license.license_key, '');
+    new.license_expires_at := owner_license.expires_at;
+    new.license_active := owner_license.id is not null;
     return new;
   end if;
 
@@ -541,6 +559,7 @@ begin
     raise exception 'Somente o administrador principal pode alterar licencas de uso.';
   end if;
 
+  new.active := true;
   return new;
 end;
 $$;

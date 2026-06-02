@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -170,6 +170,7 @@ const amenityIconRules = [
   [/diaria|diária|valor|preco|preço/, Wallet],
 ];
 const existingAccountMessage = 'Este email ja esta cadastrado.';
+const profilePermissionWarning = 'N\u00e3o foi poss\u00edvel validar suas permiss\u00f5es. Tente recarregar.';
 const authRequestTimeoutMs = 8000;
 const profileRequestTimeoutMs = 3500;
 const paymentLabels = {
@@ -411,6 +412,74 @@ function ensurePropertySlug(property, existing = []) {
     suffix += 1;
   }
   return { ...property, slug };
+}
+
+function getSupabaseErrorReason(error, fallback = 'erro desconhecido') {
+  return String(error?.message || error?.details || error?.hint || error?.code || fallback);
+}
+
+function buildPropertyPayload(propertyDraft, profile, existing = []) {
+  const role = normalizeRole(profile?.role);
+  const isOwner = role === 'proprietario';
+  const ownerId = isOwner ? profile?.id : propertyDraft.owner_id || null;
+  const ownerEmail = isOwner ? profile?.email : propertyDraft.owner_email || profile?.email || fallbackOwnerEmail;
+
+  return ensurePropertySlug(
+    {
+      ...emptyProperty,
+      ...propertyDraft,
+      id: propertyDraft.id || crypto.randomUUID(),
+      owner_id: ownerId || null,
+      owner_email: ownerEmail || fallbackOwnerEmail,
+      daily_rate: Number(propertyDraft.daily_rate || 0),
+      cleaning_fee: Number(propertyDraft.cleaning_fee || 0),
+      max_guests: Number(propertyDraft.max_guests || 1),
+      bedrooms: Number(propertyDraft.bedrooms || 1),
+      bathrooms: Number(propertyDraft.bathrooms || 1),
+      owner_whatsapp: propertyDraft.owner_whatsapp || fallbackOwnerWhatsapp,
+      maps_url: normalizeExternalUrl(propertyDraft.maps_url),
+      theme_color: normalizeHexColor(propertyDraft.theme_color || emptyProperty.theme_color),
+      active: true,
+      license_key: propertyDraft.license_key || '',
+      license_expires_at: propertyDraft.license_expires_at || '',
+      license_active: propertyDraft.license_active !== false,
+      amenities: Array.isArray(propertyDraft.amenities) ? propertyDraft.amenities : [],
+      rules: Array.isArray(propertyDraft.rules) ? propertyDraft.rules : [],
+    },
+    existing,
+  );
+}
+
+function toPropertyDbPayload(property, profile) {
+  const payload = {
+    id: property.id,
+    owner_id: property.owner_id || null,
+    slug: property.slug,
+    name: property.name || 'Casa sem nome',
+    city: property.city || '',
+    headline: property.headline || '',
+    description: property.description || '',
+    daily_rate: Number(property.daily_rate || 0),
+    cleaning_fee: Number(property.cleaning_fee || 0),
+    max_guests: Number(property.max_guests || 1),
+    bedrooms: Number(property.bedrooms || 1),
+    bathrooms: Number(property.bathrooms || 1),
+    owner_whatsapp: property.owner_whatsapp || fallbackOwnerWhatsapp,
+    owner_email: property.owner_email || profile?.email || fallbackOwnerEmail,
+    maps_url: normalizeExternalUrl(property.maps_url),
+    theme_color: normalizeHexColor(property.theme_color || emptyProperty.theme_color),
+    active: true,
+    amenities: Array.isArray(property.amenities) ? property.amenities : [],
+    rules: Array.isArray(property.rules) ? property.rules : [],
+  };
+
+  if (normalizeRole(profile?.role) === 'super_admin') {
+    payload.license_key = property.license_key || '';
+    payload.license_expires_at = property.license_expires_at || null;
+    payload.license_active = property.license_active !== false;
+  }
+
+  return payload;
 }
 
 function propertyPath(property) {
@@ -661,9 +730,10 @@ function isSuperAdminEmail(email) {
 
 function getAuthRole(profile, email) {
   const normalizedEmail = String(email || '').toLowerCase();
+  const profileRole = normalizeRole(profile?.role);
+  if (profileRole === 'super_admin') return 'super_admin';
   if (normalizedEmail === superAdminEmail.toLowerCase()) return 'super_admin';
-  if (profile?.role) return normalizeRole(profile.role);
-  if (isAdminEmail(email)) return 'proprietario';
+  if (profileRole) return profileRole;
   return 'hospede';
 }
 
@@ -894,6 +964,7 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminSession, setAdminSession] = useState(null);
   const [authProfile, setAuthProfile] = useState(null);
+  const authProfileRef = useRef(null);
   const [authChecked, setAuthChecked] = useState(!hasSupabaseConfig);
   const [publicDataChecked, setPublicDataChecked] = useState(!hasSupabaseConfig);
   const [authOpen, setAuthOpen] = useState(false);
@@ -919,6 +990,10 @@ export default function App() {
     installments: 1,
     notes: '',
   });
+
+  useEffect(() => {
+    authProfileRef.current = authProfile;
+  }, [authProfile]);
 
   const routeSlug = route.match(/^\/casas\/([^/?#]+)/)?.[1] ? decodeURIComponent(route.match(/^\/casas\/([^/?#]+)/)?.[1]) : '';
   const publicProperties = useMemo(
@@ -946,16 +1021,16 @@ export default function App() {
     [paymentSettings, property.id, property.owner_id],
   );
   const adminProperties = useMemo(() => {
-    if (!authProfile) return properties;
-    if (normalizeRole(authProfile.role) === 'super_admin') return properties;
+    if (!authProfile) return [];
+    const role = normalizeRole(authProfile.role);
+    if (role === 'super_admin') return properties;
+    if (role !== 'proprietario') return [];
     const email = String(authProfile.email || '').toLowerCase();
-    const ownedProperties = properties.filter(
+    return properties.filter(
       (item) =>
         item.owner_id === authProfile.id ||
-        String(item.owner_email || '').toLowerCase() === email ||
-        (!item.owner_id && isAdminEmail(email)),
+        (!item.owner_id && String(item.owner_email || '').toLowerCase() === email),
     );
-    return ownedProperties.length ? ownedProperties : [];
   }, [authProfile, properties]);
   const adminProperty =
     adminProperties.find((item) => item.id === property.id) ||
@@ -1089,7 +1164,11 @@ export default function App() {
       if (Array.isArray(propertyRows)) {
         const normalizedProperties = propertyRows.map((item, index, rows) => ensurePropertySlug(item, rows));
         setProperties(normalizedProperties);
-        if (normalizedProperties.length) setSelectedPropertyId(normalizedProperties[0].id);
+        if (normalizedProperties.length) {
+          setSelectedPropertyId((current) =>
+            normalizedProperties.some((item) => item.id === current) ? current : normalizedProperties[0].id,
+          );
+        }
       }
       if (Array.isArray(photoRows)) setPhotos(photoRows);
       if (Array.isArray(reservationRows)) setReservations(reservationRows);
@@ -1111,21 +1190,25 @@ export default function App() {
     }
   }
 
-  async function resolveAuthProfile(session) {
+  async function resolveAuthProfile(session, options = {}) {
+    const { createMissingProfile = false } = options;
     if (!session?.user) {
       setAdminSession(null);
       setAuthProfile(null);
+      authProfileRef.current = null;
       setAdminUnlocked(false);
       setAuthChecked(true);
       return null;
     }
 
+    const previousProfile = authProfileRef.current?.id === session.user.id ? authProfileRef.current : null;
+    const emailRole = isSuperAdminEmail(session.user.email) ? 'super_admin' : '';
     let profile = {
       id: session.user.id,
       email: session.user.email,
-      full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
-      phone: session.user.user_metadata?.phone || '',
-      role: getAuthRole(null, session.user.email),
+      full_name: previousProfile?.full_name || session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+      phone: previousProfile?.phone || session.user.user_metadata?.phone || '',
+      role: previousProfile?.role || emailRole || '',
     };
 
     if (hasSupabaseConfig) {
@@ -1141,23 +1224,65 @@ export default function App() {
 
       if (data) {
         profile = { ...profile, ...data, role: getAuthRole(data, session.user.email) };
-      } else if (!error) {
-        void safeSupabaseQuery(
-          supabase.from('profiles').upsert({
+        setMessage((current) => (current === profilePermissionWarning ? '' : current));
+      } else if (error) {
+        console.error('resolveAuthProfile profile query error', error);
+        setMessage(profilePermissionWarning);
+        if (previousProfile) {
+          const preservedProfile = { ...previousProfile, email: session.user.email || previousProfile.email };
+          setAdminSession(session);
+          setAuthProfile(preservedProfile);
+          authProfileRef.current = preservedProfile;
+          setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(preservedProfile.role)));
+          setAuthChecked(true);
+          return preservedProfile;
+        }
+        if (!emailRole) {
+          setAdminSession(session);
+          setAuthChecked(true);
+          return null;
+        }
+        profile.role = emailRole;
+      } else if (createMissingProfile) {
+        const { error: insertError } = await safeSupabaseQuery(
+          supabase.from('profiles').insert({
             id: session.user.id,
             email: session.user.email,
-            role: profile.role || 'hospede',
+            role: 'hospede',
             full_name: profile.full_name,
             phone: profile.phone,
           }),
           profileRequestTimeoutMs,
           'Criacao do perfil excedeu o tempo limite.',
         );
+        if (insertError) {
+          console.error('resolveAuthProfile profile insert error', insertError);
+          setMessage(profilePermissionWarning);
+          setAdminSession(session);
+          setAuthChecked(true);
+          return null;
+        }
+        profile = { ...profile, role: 'hospede' };
+        setMessage((current) => (current === profilePermissionWarning ? '' : current));
+      } else {
+        setMessage(profilePermissionWarning);
+        if (previousProfile) {
+          profile = { ...previousProfile, email: session.user.email || previousProfile.email };
+        } else if (!emailRole) {
+          setAdminSession(session);
+          setAuthChecked(true);
+          return null;
+        } else {
+          profile.role = emailRole;
+        }
       }
+    } else {
+      profile = { ...profile, role: getAuthRole(null, session.user.email) };
     }
 
     setAdminSession(session);
     setAuthProfile(profile);
+    authProfileRef.current = profile;
     setAdminUnlocked(['proprietario', 'super_admin'].includes(normalizeRole(profile.role)));
     setAuthChecked(true);
     return profile;
@@ -1219,16 +1344,18 @@ export default function App() {
     supabase.auth.getSession().then(async ({ data }) => {
       if (isPasswordRecoveryUrl()) setPasswordRecoveryOpen(true);
       const profile = await resolveAuthProfile(data.session);
-      if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
+      if (['super_admin', 'proprietario'].includes(normalizeRole(profile?.role))) loadSupabaseData();
     });
 
-    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setPasswordRecoveryOpen(true);
         navigateTo('/reset-password');
       }
-      const profile = await resolveAuthProfile(session);
-      if (['super_admin', 'proprietario'].includes(profile?.role)) loadSupabaseData();
+      window.setTimeout(async () => {
+        const profile = await resolveAuthProfile(session);
+        if (['super_admin', 'proprietario'].includes(normalizeRole(profile?.role))) loadSupabaseData();
+      }, 0);
     });
 
     return () => data.subscription.unsubscribe();
@@ -1516,27 +1643,35 @@ export default function App() {
   }
 
   async function saveProperty(updated) {
-    const normalized = ensurePropertySlug({
-      ...updated,
-      owner_id: updated.owner_id || (normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : updated.owner_id),
-      owner_email: updated.owner_email || (normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.email : fallbackOwnerEmail),
-      maps_url: normalizeExternalUrl(updated.maps_url),
-    }, properties);
+    const role = normalizeRole(authProfile?.role);
+    if (hasSupabaseConfig && role === 'proprietario' && !authProfile?.id) {
+      setMessage('N\u00e3o foi poss\u00edvel salvar a casa: usu\u00e1rio autenticado sem id.');
+      return false;
+    }
+
+    const previousProperties = properties;
+    const normalized = buildPropertyPayload(updated, authProfile, properties);
 
     setProperties((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
     if (hasSupabaseConfig) {
       try {
-        await updatePropertyRecord(
+        const savedProperty = await updatePropertyRecord(
           supabase,
-          normalized,
-          normalizeRole(authProfile?.role) === 'proprietario' ? authProfile.id : null,
+          toPropertyDbPayload(normalized, authProfile),
+          role === 'proprietario' ? authProfile.id : null,
         );
-      } catch {
-        setMessage('Nao foi possivel salvar a casa agora.');
-        return;
+        const nextProperty = ensurePropertySlug({ ...normalized, ...savedProperty }, properties);
+        setProperties((current) => current.map((item) => (item.id === nextProperty.id ? nextProperty : item)));
+        setSelectedPropertyId(nextProperty.id);
+        await loadSupabaseData();
+      } catch (error) {
+        setProperties(previousProperties);
+        setMessage(`N\u00e3o foi poss\u00edvel salvar a casa: ${getSupabaseErrorReason(error)}`);
+        return false;
       }
     }
-    setMessage('Informações da casa atualizadas.');
+    setMessage('Casa salva com sucesso.');
+    return true;
   }
 
   function selectProperty(propertyId) {
@@ -1547,6 +1682,11 @@ export default function App() {
   async function addProperty(propertyDraft) {
     const role = normalizeRole(authProfile?.role);
     const ownerId = propertyDraft.owner_id || (role === 'proprietario' ? authProfile?.id : null);
+    if (hasSupabaseConfig && role === 'proprietario' && !authProfile?.id) {
+      setMessage('N\u00e3o foi poss\u00edvel salvar a casa: usu\u00e1rio autenticado sem id.');
+      return false;
+    }
+
     const ownerLicense = getLatestOwnerLicense(licenses, ownerId);
     const limitState = getOwnerPropertyLimitState({
       role,
@@ -1559,50 +1699,33 @@ export default function App() {
     if (!limitState.canCreate) {
       setMessage(
         limitState.reason === 'limit_reached'
-          ? 'Você atingiu o limite de casas da sua licença.'
-          : 'Licença ativa necessária para cadastrar casas.',
+          ? 'Voc\u00ea atingiu o limite de casas da sua licen\u00e7a.'
+          : 'Licen\u00e7a ativa necess\u00e1ria para cadastrar casas.',
       );
       return false;
     }
 
-    const propertyPayload = ensurePropertySlug({
-      ...emptyProperty,
-      ...propertyDraft,
-      id: crypto.randomUUID(),
-      owner_id: ownerId,
-      daily_rate: Number(propertyDraft.daily_rate || 0),
-      cleaning_fee: Number(propertyDraft.cleaning_fee || 0),
-      max_guests: Number(propertyDraft.max_guests || 1),
-      bedrooms: Number(propertyDraft.bedrooms || 1),
-      bathrooms: Number(propertyDraft.bathrooms || 1),
-      owner_whatsapp: propertyDraft.owner_whatsapp || fallbackOwnerWhatsapp,
-      owner_email: propertyDraft.owner_email || authProfile?.email || fallbackOwnerEmail,
-      maps_url: normalizeExternalUrl(propertyDraft.maps_url),
-      active: propertyDraft.active !== false,
-      license_key: propertyDraft.license_key || '',
-      license_expires_at: propertyDraft.license_expires_at || '',
-      license_active: propertyDraft.license_active !== false,
-      amenities: Array.isArray(propertyDraft.amenities) ? propertyDraft.amenities : [],
-      rules: Array.isArray(propertyDraft.rules) ? propertyDraft.rules : [],
-    }, properties);
-
+    const propertyPayload = buildPropertyPayload({ ...propertyDraft, id: crypto.randomUUID(), owner_id: ownerId }, authProfile, properties);
     let createdProperty = propertyPayload;
+
     if (hasSupabaseConfig) {
       try {
-        createdProperty = await createPropertyRecord(supabase, propertyPayload);
+        createdProperty = await createPropertyRecord(supabase, toPropertyDbPayload(propertyPayload, authProfile));
       } catch (error) {
-        setMessage(
-          /limite|limit/i.test(error?.message || '')
-            ? 'Você atingiu o limite de casas da sua licença.'
-            : 'Não foi possível cadastrar a casa agora.',
-        );
+        setMessage(`N\u00e3o foi poss\u00edvel salvar a casa: ${getSupabaseErrorReason(error)}`);
         return false;
       }
+
+      createdProperty = ensurePropertySlug({ ...propertyPayload, ...createdProperty }, [...properties, propertyPayload]);
+      setSelectedPropertyId(createdProperty.id);
+      await loadSupabaseData();
+      setMessage('Casa salva com sucesso.');
+      return true;
     }
 
     setProperties((current) => [...current, createdProperty]);
     setSelectedPropertyId(createdProperty.id);
-    setMessage('Casa cadastrada. Agora adicione fotos e ajuste os dados.');
+    setMessage('Casa salva com sucesso.');
     return true;
   }
 
@@ -1932,6 +2055,7 @@ export default function App() {
     if (hasSupabaseConfig) await supabase.auth.signOut();
     setAdminSession(null);
     setAuthProfile(null);
+    authProfileRef.current = null;
     setAdminUnlocked(false);
     setAdminOpen(false);
     setClientPortalOpen(false);
@@ -2670,6 +2794,7 @@ export default function App() {
             createManualReservation={createManualReservation}
             createPaymentLink={createPaymentLink}
             reorderPhoto={reorderPhoto}
+            resolveAuthProfile={resolveAuthProfile}
             registerPayment={registerPayment}
             addCashMovement={addCashMovement}
             saveProperty={saveProperty}
@@ -4384,21 +4509,12 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
         setMode('login');
         return;
       }
-      if (data?.session && data.user) {
-        await safeSupabaseQuery(
-          supabase.from('profiles').upsert({
-            id: data.user.id,
-            email: form.email.trim(),
-            full_name: form.full_name,
-            phone: form.phone,
-            role: 'hospede',
-          }),
-          profileRequestTimeoutMs,
-          'Cadastro criado, mas o perfil demorou para salvar.',
-        );
-      }
       if (data?.session) {
-        const profile = await resolveAuthProfile(data.session);
+        const profile = await resolveAuthProfile(data.session, { createMissingProfile: true });
+        if (!profile) {
+          setError(profilePermissionWarning);
+          return;
+        }
         onAuthenticated(profile);
         setSubmitting(false);
         return;
@@ -4433,6 +4549,10 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
       return;
     }
     const profile = await resolveAuthProfile(data.session);
+    if (!profile) {
+      setError(profilePermissionWarning);
+      return;
+    }
     onAuthenticated(profile);
     setSubmitting(false);
     } catch {
@@ -5225,6 +5345,7 @@ function AdminPanel({
   createManualReservation,
   createPaymentLink,
   reorderPhoto,
+  resolveAuthProfile,
   onClose,
   onSelectProperty,
   onUnlock,
@@ -5554,13 +5675,13 @@ function AdminPanel({
     writeLocalData('adminDetails', normalizedDetails);
 
     if (hasSupabaseConfig && adminSession?.user?.id) {
-      await supabase.from('profiles').upsert({
-        id: adminSession.user.id,
-        email: normalizedDetails.email,
-        full_name: normalizedDetails.full_name,
-        phone: normalizedDetails.phone,
-        role: normalizedDetails.role,
-      });
+      await supabase
+        .from('profiles')
+        .update({
+          full_name: normalizedDetails.full_name,
+          phone: normalizedDetails.phone,
+        })
+        .eq('id', adminSession.user.id);
     }
 
     setAdminNotice('Dados do administrador salvos.');
@@ -6108,11 +6229,21 @@ function AdminPanel({
                   );
                   return;
                 }
-                if (error) setLoginError('Login nao autorizado. Confira e-mail e senha.');
-                if (data?.user && !['proprietario', 'super_admin'].includes(getAuthRole(null, data.user.email))) {
-                  await supabase.auth.signOut();
-                  setLoginError('Este e-mail não tem permissão de proprietário.');
+                if (error) {
+                  setLoginError('Login nao autorizado. Confira e-mail e senha.');
+                  return;
                 }
+                const profile = await resolveAuthProfile(data.session);
+                if (!profile) {
+                  setLoginError(profilePermissionWarning);
+                  return;
+                }
+                if (!['proprietario', 'super_admin'].includes(normalizeRole(profile.role))) {
+                  setLoginError('Este e-mail n\u00e3o tem permiss\u00e3o de propriet\u00e1rio.');
+                  await supabase.auth.signOut();
+                  return;
+                }
+                onUnlock();
                 return;
               }
 
