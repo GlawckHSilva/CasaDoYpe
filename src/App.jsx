@@ -394,6 +394,31 @@ const placeholderPhoto = {
   alt: 'Sem foto cadastrada',
 };
 
+function PropertyPhotoImage({ src, alt = 'Foto da casa', className = '', ...props }) {
+  const [imageFailed, setImageFailed] = useState(!src);
+
+  useEffect(() => {
+    setImageFailed(!src);
+  }, [src]);
+
+  if (!src || imageFailed) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-[#eef5ff] text-center text-ink/60 dark:bg-slate-800 dark:text-white/70 ${className}`}
+        role="img"
+        aria-label="Imagem indisponível"
+      >
+        <div className="grid justify-items-center gap-2 px-4">
+          <ImagePlus size={28} aria-hidden="true" />
+          <span className="text-xs font-black uppercase tracking-wide">Imagem indisponível</span>
+        </div>
+      </div>
+    );
+  }
+
+  return <img className={className} src={src} alt={alt} onError={() => setImageFailed(true)} {...props} />;
+}
+
 function toDate(value) {
   return value ? parseISO(value) : null;
 }
@@ -2823,7 +2848,7 @@ export default function App() {
 
       <main id="inicio">
         <section className="relative overflow-hidden bg-ink text-white">
-          <img
+          <PropertyPhotoImage
             key={`hero-${property.id}-${heroPhoto?.id || 'photo'}`}
             className="property-fade absolute inset-0 h-full w-full object-cover opacity-70"
             src={heroPhoto?.url}
@@ -2976,25 +3001,24 @@ export default function App() {
                 <p className="mt-2 text-ink/70 dark:text-white/70">A galeria atualiza quando você adiciona novas fotos.</p>
               </div>
             </div>
-            <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-              <img
-                className="h-[360px] w-full rounded-md object-cover shadow-soft sm:h-[540px]"
-                src={selectedPhotoData?.url}
-                alt={selectedPhotoData?.alt || 'Foto selecionada'}
-              />
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-1">
-                {propertyPhotos.slice(0, 4).map((photo, index) => (
-                  <button
-                    key={photo.id}
-                    className={`h-40 overflow-hidden rounded-md border-2 bg-white ${
-                      selectedPhoto === index ? 'border-coral' : 'border-transparent'
-                    }`}
-                    onClick={() => setSelectedPhoto(index)}
-                  >
-                    <img className="h-full w-full object-cover" src={photo.url} alt={photo.alt} />
-                  </button>
-                ))}
-              </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {(propertyPhotos.length ? propertyPhotos : [selectedPhotoData || placeholderPhoto]).map((photo, index) => (
+                <article key={photo.id || `photo-${index}`} className="flex min-h-0 flex-col overflow-hidden rounded-md border border-ink/10 bg-white shadow-sm dark:border-white/10 dark:bg-slate-800">
+                  <PropertyPhotoImage
+                    className="h-40 w-full object-cover sm:h-[220px]"
+                    src={photo?.url}
+                    alt={photo?.alt || `Foto ${index + 1} da casa`}
+                  />
+                  <div className="flex flex-1 items-center justify-between gap-3 p-3">
+                    <span className="min-w-0 truncate text-sm font-bold text-ink/70 dark:text-white/75">
+                      {photo?.alt || `Foto ${index + 1}`}
+                    </span>
+                    {photo?.is_primary || index === 0 ? (
+                      <span className="shrink-0 rounded-md bg-leaf/10 px-2 py-1 text-[11px] font-black text-leaf">Imagem principal</span>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
         </section>
@@ -3516,7 +3540,7 @@ function PropertyCard({ property, photo, onNavigate }) {
     <article className="brand-card brand-card-hover overflow-hidden rounded-md">
       <button type="button" className="block w-full text-left" onClick={() => onNavigate(propertyPath(property))}>
         <div className="relative">
-          <img className="h-56 w-full object-cover" src={photo?.url || placeholderPhoto.url} alt={photo?.alt || property.name} />
+          <PropertyPhotoImage className="h-40 w-full object-cover sm:h-[220px]" src={photo?.url} alt={photo?.alt || property.name} />
           <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-black text-ink shadow-sm">
             <Wallet size={14} className="text-leaf" />
             {currency.format(property.daily_rate || 0)}
@@ -3655,7 +3679,7 @@ function MarketingHome({
       />
       <main>
         <section className="relative overflow-hidden bg-ink text-white">
-          <img className="absolute inset-0 h-full w-full object-cover opacity-45" src={heroPhoto.url} alt={heroPhoto.alt || 'Hospedagem'} />
+          <PropertyPhotoImage className="absolute inset-0 h-full w-full object-cover opacity-45" src={heroPhoto.url} alt={heroPhoto.alt || 'Hospedagem'} />
           <div className="absolute inset-0 bg-gradient-to-r from-ink via-ink/80 to-ink/35" />
           <div className="relative mx-auto grid min-h-[640px] max-w-7xl content-center gap-8 px-4 py-20 sm:px-6 lg:px-8">
             <div className="max-w-3xl">
@@ -5065,13 +5089,7 @@ function PlatformFinancialDashboard({
   const reportCards = [
     ['Faturamento mensal', currency.format(reports.monthlyRevenue), BarChart3],
     ['Faturamento anual', currency.format(reports.annualRevenue), ChartColumnIncreasing],
-    ['Total recebido', currency.format(reports.totalReceived), Wallet],
-    ['Total gasto', currency.format(reports.totalSpent), CreditCard],
-    ['A pagar', currency.format(reports.totalPayable || 0), CalendarDays],
     ['Lucro líquido', currency.format(reports.netProfit), BadgeDollarSign],
-    ['Licenças ativas', reports.activeLicenses, ShieldCheck],
-    ['Licenças vencidas', reports.expiredLicenses, AlertTriangle],
-    ['Licenças bloqueadas', reports.blockedLicenses, Lock],
   ];
   const maxMonthly = Math.max(
     ...monthlyRows.map((row) => row.income),
@@ -5202,7 +5220,7 @@ function PlatformFinancialDashboard({
         <FinanceCard icon={BarChart3} label="Total" value={currency.format(summary.total)} />
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-3">
         {reportCards.map(([label, value, Icon]) => (
           <div key={label} className="rounded-md bg-white p-4 shadow-sm">
             <Icon className="text-leaf" size={22} aria-hidden="true" />
@@ -5212,13 +5230,13 @@ function PlatformFinancialDashboard({
         ))}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <section>
         <div className="rounded-md bg-white p-4 shadow-sm">
           <h3 className="font-black">Receitas, despesas e lucro por mês</h3>
           <div className="mt-4 grid gap-3">
             {monthlyRows.length ? (
               monthlyRows.map((row) => (
-                <div key={row.monthKey} className="grid gap-2 rounded-md border border-ink/10 p-3 sm:grid-cols-[80px_1fr_auto] sm:items-center">
+                <div key={row.monthKey} className="grid gap-2 rounded-md border border-ink/10 p-3 sm:grid-cols-[80px_1fr] sm:items-center">
                   <span className="text-xs font-bold text-ink/55">{row.monthKey}</span>
                   <div>
                     <div className="grid gap-1">
@@ -5241,26 +5259,10 @@ function PlatformFinancialDashboard({
                       <span>Lucro: {currency.format(row.total)}</span>
                     </div>
                   </div>
-                  <span className="text-sm font-black sm:text-right">{row.licensesSold} licenças</span>
                 </div>
               ))
             ) : (
               <p className="text-sm text-ink/60">Sem lançamentos financeiros do Hospedex.</p>
-            )}
-          </div>
-        </div>
-        <div className="rounded-md bg-white p-4 shadow-sm">
-          <h3 className="font-black">Licenças vendidas</h3>
-          <div className="mt-4 grid gap-3">
-            {monthlyRows.length ? (
-              monthlyRows.map((row) => (
-                <div key={`licenses-${row.monthKey}`} className="flex items-center justify-between rounded-md bg-[#f4f8ff] px-3 py-2 text-sm">
-                  <span className="font-bold text-ink/60">{row.monthKey}</span>
-                  <span className="font-black">{row.licensesSold}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-ink/60">Nenhuma venda registrada.</p>
             )}
           </div>
         </div>
@@ -8117,26 +8119,34 @@ function AdminPanel({
                 Adicionar por URL
               </Button>
               {propertyPhotos.length ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {propertyPhotos.map((item) => (
-                    <div key={item.id} className="grid gap-2 rounded-md border border-ink/10 bg-[#f4f8ff] p-3">
-                      <img className="h-32 w-full rounded-md object-cover" src={item.url} alt={item.alt || 'Foto da casa'} />
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="truncate text-sm font-semibold text-ink/70">{item.alt || 'Foto sem descrição'}</span>
-                        <div className="flex gap-2">
-                          <Button type="button" variant="outline" onClick={() => reorderPhoto(item.id, -1)} aria-label="Mover foto para cima">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {propertyPhotos.map((item, index) => (
+                    <article key={item.id} className="flex min-h-0 flex-col overflow-hidden rounded-md border border-ink/10 bg-[#f4f8ff] shadow-sm">
+                      <PropertyPhotoImage
+                        className="h-40 w-full object-cover sm:h-[220px]"
+                        src={item.url}
+                        alt={item.alt || 'Foto da casa'}
+                      />
+                      <div className="flex flex-1 flex-col gap-3 p-3">
+                        <div className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-ink/70">{item.alt || 'Foto sem descrição'}</span>
+                          {item.is_primary || item.sort_order === 1 || index === 0 ? (
+                            <span className="mt-2 inline-flex rounded-md bg-leaf/10 px-2 py-1 text-xs font-black text-leaf">Imagem principal</span>
+                          ) : null}
+                        </div>
+                        <div className="mt-auto flex items-center justify-end gap-2 border-t border-ink/10 pt-3">
+                          <Button type="button" variant="outline" className="min-h-9 px-3 py-2" onClick={() => reorderPhoto(item.id, -1)} aria-label="Mover foto para cima">
                             <ChevronLeft size={16} />
                           </Button>
-                          <Button type="button" variant="outline" onClick={() => reorderPhoto(item.id, 1)} aria-label="Mover foto para baixo">
+                          <Button type="button" variant="outline" className="min-h-9 px-3 py-2" onClick={() => reorderPhoto(item.id, 1)} aria-label="Mover foto para baixo">
                             <ChevronRight size={16} />
                           </Button>
-                          <Button type="button" variant="outline" onClick={() => deletePhoto(item.id)} aria-label="Excluir foto">
+                          <Button type="button" variant="outline" className="min-h-9 px-3 py-2" onClick={() => deletePhoto(item.id)} aria-label="Excluir foto">
                             <Trash2 size={16} />
                           </Button>
                         </div>
                       </div>
-                      {item.sort_order === 1 ? <span className="text-xs font-black text-leaf">Imagem principal</span> : null}
-                    </div>
+                    </article>
                   ))}
                 </div>
               ) : (
