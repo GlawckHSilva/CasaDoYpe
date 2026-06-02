@@ -107,6 +107,12 @@ const legacyRoleMap = {
   admin: 'proprietario',
   client: 'hospede',
 };
+const uiStateKeys = {
+  selectedPropertyId: 'ui:selectedPropertyId',
+  adminView: 'ui:adminView',
+  clientPortalView: 'ui:clientPortalView',
+  superAdminView: 'ui:superAdminView',
+};
 const localAdminPassword = import.meta.env.VITE_LOCAL_ADMIN_PASSWORD || '';
 const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
 const canUsePasswordAdmin = Boolean(adminPassword);
@@ -277,6 +283,19 @@ const emptyProperty = {
   rules: [],
   amenities: [],
 };
+
+function createEmptyPropertyDraft() {
+  return {
+    ...emptyProperty,
+    name: '',
+    city: '',
+    maps_url: '',
+    headline: '',
+    description: '',
+    amenities: '',
+    rules: '',
+  };
+}
 
 const emptyPublicProperty = {
   ...emptyProperty,
@@ -510,6 +529,27 @@ async function safeSupabaseQuery(query, timeoutMs = 12000, timeoutMessage = 'Con
   }
 }
 
+function normalizeFunctionErrorMessage(message, fallback = 'Erro interno ao executar a função.') {
+  const text = String(message || '').trim();
+  if (!text) return fallback;
+  if (/^unauthorized\.?$/i.test(text) || /missing_auth_token|invalid_session|jwt|token expired|sess[aã]o invalida|sess[aã]o expirada/i.test(text)) {
+    return 'Sessão expirada. Faça login novamente.';
+  }
+  if (/not_super_admin|only super admins|permission|permiss/i.test(text)) {
+    return 'Você não tem permissão para excluir usuários.';
+  }
+  if (/missing_service_role|service role/i.test(text)) {
+    return 'Edge Function sem service_role configurada.';
+  }
+  if (/missing_supabase_url|supabase_url/i.test(text)) {
+    return 'Edge Function sem SUPABASE_URL configurada.';
+  }
+  if (/user_not_found|usuario nao encontrado|usu[aá]rio n[aã]o encontrado|not found/i.test(text)) {
+    return 'Usuário alvo não encontrado.';
+  }
+  return text;
+}
+
 async function getFunctionErrorMessage(error, fallback = 'Erro interno ao executar a função.') {
   try {
     const response = error?.context?.clone?.();
@@ -517,21 +557,21 @@ async function getFunctionErrorMessage(error, fallback = 'Erro interno ao execut
       const contentType = response.headers?.get?.('content-type') || '';
       if (contentType.includes('application/json')) {
         const body = await response.json();
-        if (typeof body?.error === 'string') return body.error;
-        if (typeof body?.message === 'string') return body.message;
-        if (typeof body?.detail === 'string') return body.detail;
+        if (typeof body?.error === 'string') return normalizeFunctionErrorMessage(body.error, fallback);
+        if (typeof body?.message === 'string') return normalizeFunctionErrorMessage(body.message, fallback);
+        if (typeof body?.detail === 'string') return normalizeFunctionErrorMessage(body.detail, fallback);
       }
 
       const text = await response.text();
-      if (text) return text;
+      if (text) return normalizeFunctionErrorMessage(text, fallback);
     }
   } catch (_parseError) {
     // Keep the user-facing fallback instead of surfacing a parser failure.
   }
 
   const sdkMessage = error?.message || '';
-  if (sdkMessage && !/non-2xx status code/i.test(sdkMessage)) return sdkMessage;
-  return fallback;
+  if (sdkMessage && !/non-2xx status code/i.test(sdkMessage)) return normalizeFunctionErrorMessage(sdkMessage, fallback);
+  return normalizeFunctionErrorMessage('', fallback);
 }
 
 function mixHex(color, target, amount) {
@@ -944,7 +984,9 @@ export default function App() {
   const routerNavigate = useNavigate();
   const route = location.pathname || '/';
   const [properties, setProperties] = useState(() => (useDemoFallback ? readLocalData('properties', demoProperties) : []));
-  const [selectedPropertyId, setSelectedPropertyId] = useState(() => (useDemoFallback ? readLocalData('selectedPropertyId', demoProperty.id) : ''));
+  const [selectedPropertyId, setSelectedPropertyId] = useState(() =>
+    readLocalData(uiStateKeys.selectedPropertyId, useDemoFallback ? readLocalData('selectedPropertyId', demoProperty.id) : ''),
+  );
   const [photos, setPhotos] = useState(() => (useDemoFallback ? readLocalData('photos', demoPhotos) : []));
   const [reservations, setReservations] = useState(() => (useDemoFallback ? readLocalData('reservations', demoReservations) : []));
   const [cashMovements, setCashMovements] = useState(() => (useDemoFallback ? readLocalData('cashMovements', []) : []));
@@ -969,15 +1011,16 @@ export default function App() {
   const [publicDataChecked, setPublicDataChecked] = useState(!hasSupabaseConfig);
   const [authOpen, setAuthOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState('login');
-  const [adminInitialView, setAdminInitialView] = useState('dashboard');
-  const [clientPortalInitialView, setClientPortalInitialView] = useState('dashboard');
-  const [superAdminInitialView, setSuperAdminInitialView] = useState('dashboard');
+  const [adminInitialView, setAdminInitialView] = useState(() => readLocalData(uiStateKeys.adminView, 'dashboard'));
+  const [clientPortalInitialView, setClientPortalInitialView] = useState(() => readLocalData(uiStateKeys.clientPortalView, 'dashboard'));
+  const [superAdminInitialView, setSuperAdminInitialView] = useState(() => readLocalData(uiStateKeys.superAdminView, 'dashboard'));
   const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(() => isPasswordRecoveryUrl());
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(getInitialThemeMode);
   const [message, setMessage] = useState('');
   const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('');
   const [propertyTransitionKey, setPropertyTransitionKey] = useState(0);
+  const profilesRef = useRef([]);
   const [booking, setBooking] = useState({
     check_in: '',
     check_out: '',
@@ -1164,11 +1207,12 @@ export default function App() {
       if (Array.isArray(propertyRows)) {
         const normalizedProperties = propertyRows.map((item, index, rows) => ensurePropertySlug(item, rows));
         setProperties(normalizedProperties);
-        if (normalizedProperties.length) {
-          setSelectedPropertyId((current) =>
-            normalizedProperties.some((item) => item.id === current) ? current : normalizedProperties[0].id,
-          );
-        }
+        setSelectedPropertyId((current) => {
+          const stored = readLocalData(uiStateKeys.selectedPropertyId, '');
+          const preferred = current || stored;
+          if (preferred && normalizedProperties.some((item) => item.id === preferred)) return preferred;
+          return normalizedProperties[0]?.id || preferred || '';
+        });
       }
       if (Array.isArray(photoRows)) setPhotos(photoRows);
       if (Array.isArray(reservationRows)) setReservations(reservationRows);
@@ -1228,8 +1272,9 @@ export default function App() {
       } else if (error) {
         console.error('resolveAuthProfile profile query error', error);
         setMessage(profilePermissionWarning);
-        if (previousProfile) {
-          const preservedProfile = { ...previousProfile, email: session.user.email || previousProfile.email };
+        const cachedProfile = previousProfile || profilesRef.current.find((item) => item.id === session.user.id);
+        if (cachedProfile) {
+          const preservedProfile = { ...cachedProfile, email: session.user.email || cachedProfile.email };
           setAdminSession(session);
           setAuthProfile(preservedProfile);
           authProfileRef.current = preservedProfile;
@@ -1266,8 +1311,9 @@ export default function App() {
         setMessage((current) => (current === profilePermissionWarning ? '' : current));
       } else {
         setMessage(profilePermissionWarning);
-        if (previousProfile) {
-          profile = { ...previousProfile, email: session.user.email || previousProfile.email };
+        const cachedProfile = previousProfile || profilesRef.current.find((item) => item.id === session.user.id);
+        if (cachedProfile) {
+          profile = { ...cachedProfile, email: session.user.email || cachedProfile.email };
         } else if (!emailRole) {
           setAdminSession(session);
           setAuthChecked(true);
@@ -1292,6 +1338,14 @@ export default function App() {
     loadSupabaseData();
   }, []);
 
+  useEffect(() => {
+    authProfileRef.current = authProfile;
+  }, [authProfile]);
+
+  useEffect(() => {
+    profilesRef.current = profiles;
+  }, [profiles]);
+
   function navigateTo(path, options = {}) {
     if (!path || route === path) return;
     routerNavigate(path, { replace: Boolean(options.replace) });
@@ -1304,16 +1358,19 @@ export default function App() {
 
   function openAdminSection(view = 'dashboard') {
     setAdminInitialView(view);
+    writeLocalData(uiStateKeys.adminView, view);
     navigateTo('/admin');
   }
 
   function openClientSection(view = 'dashboard') {
     setClientPortalInitialView(view);
+    writeLocalData(uiStateKeys.clientPortalView, view);
     navigateTo('/hospede');
   }
 
   function openSuperAdminSection(view = 'dashboard') {
     setSuperAdminInitialView(view);
+    writeLocalData(uiStateKeys.superAdminView, view);
     navigateTo('/super-admin');
   }
 
@@ -1348,10 +1405,17 @@ export default function App() {
     });
 
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        window.setTimeout(() => {
+          void resolveAuthProfile(null);
+        }, 0);
+        return;
+      }
       if (event === 'PASSWORD_RECOVERY') {
         setPasswordRecoveryOpen(true);
         navigateTo('/reset-password');
       }
+      if (!session?.user) return;
       window.setTimeout(async () => {
         const profile = await resolveAuthProfile(session);
         if (['super_admin', 'proprietario'].includes(normalizeRole(profile?.role))) loadSupabaseData();
@@ -1367,6 +1431,7 @@ export default function App() {
   }, [properties]);
 
   useEffect(() => {
+    if (selectedPropertyId) writeLocalData(uiStateKeys.selectedPropertyId, selectedPropertyId);
     if (!useDemoFallback) return;
     writeLocalData('selectedPropertyId', selectedPropertyId);
   }, [selectedPropertyId]);
@@ -3603,7 +3668,7 @@ function SuperAdminDashboard({
   onRefresh,
   addAdminLog,
 }) {
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState(() => readLocalData(uiStateKeys.superAdminView, initialView || 'dashboard'));
   const [query, setQuery] = useState('');
   const [licenseEdits, setLicenseEdits] = useState({});
   const [userNotice, setUserNotice] = useState('');
@@ -3630,8 +3695,15 @@ function SuperAdminDashboard({
   });
 
   useEffect(() => {
-    setView(initialView || 'dashboard');
+    const storedView = readLocalData(uiStateKeys.superAdminView, '');
+    const nextView = storedView || initialView || 'dashboard';
+    setView((current) => (current === nextView ? current : nextView));
   }, [initialView]);
+
+  function changeView(nextView) {
+    setView(nextView);
+    writeLocalData(uiStateKeys.superAdminView, nextView);
+  }
 
   const owners = profiles.filter((profile) => normalizeRole(profile.role) === 'proprietario');
   const guests = profiles.filter((profile) => normalizeRole(profile.role) === 'hospede');
@@ -3735,13 +3807,35 @@ function SuperAdminDashboard({
       setUserNotice('O Super Admin principal não pode ser excluído.');
       return;
     }
-    const confirmed = window.confirm('Tem certeza que deseja excluir este usuário? Essa ação apagará o histórico dele e não poderá ser desfeita.');
+    const confirmed = window.confirm('Tem certeza que deseja excluir este usuário? Essa ação apagará todo o histórico dele e não poderá ser desfeita.');
     if (!confirmed) return;
 
     if (hasSupabaseConfig) {
       setUserNotice('Excluindo usuário...');
+      const { data: sessionData, error: sessionError } = await safeSupabaseQuery(
+        supabase.auth.getSession(),
+        authRequestTimeoutMs,
+        'Consulta da sessão excedeu o tempo limite.',
+      );
+      let session = sessionData?.session || null;
+      if (sessionError || !session?.access_token) {
+        setUserNotice('Sessão expirada. Faça login novamente.');
+        return;
+      }
+      const expiresAtMs = Number(session.expires_at || 0) * 1000;
+      if (expiresAtMs && expiresAtMs < Date.now() + 30000) {
+        const { data: refreshedData, error: refreshError } = await safeSupabaseQuery(
+          supabase.auth.refreshSession(),
+          authRequestTimeoutMs,
+          'Renovação da sessão excedeu o tempo limite.',
+        );
+        if (!refreshError && refreshedData?.session?.access_token) {
+          session = refreshedData.session;
+        }
+      }
       const { data, error } = await supabase.functions.invoke('delete-user-cascade', {
-        body: { userId: profile.id, email: profile.email },
+        body: { userId: profile.id, user_id: profile.id, email: profile.email },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (error) {
         const message = await getFunctionErrorMessage(error, 'Edge Function não configurada ou não publicada.');
@@ -3749,7 +3843,7 @@ function SuperAdminDashboard({
         return;
       }
       if (data?.error) {
-        setUserNotice(`Não foi possível excluir: ${data.error}`);
+        setUserNotice(`Não foi possível excluir: ${normalizeFunctionErrorMessage(data.error, 'Erro interno ao excluir usuário.')}`);
         return;
       }
     }
@@ -3927,7 +4021,7 @@ function SuperAdminDashboard({
                 className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 lg:py-3 ${
                   view === key ? 'bg-leaf text-white' : 'hover:bg-mist'
                 }`}
-                onClick={() => setView(key)}
+                onClick={() => changeView(key)}
               >
                 <PanelIcon icon={icon} size={20} />
                 {label}
@@ -4898,7 +4992,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
     .filter((reservation) => reservation.guest_email === authProfile?.email)
     .sort((a, b) => String(b.created_at || b.check_in).localeCompare(String(a.created_at || a.check_in)));
   const currentReservation = clientReservations.find((reservation) => ['pending', 'confirmed'].includes(reservation.status));
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState(() => readLocalData(uiStateKeys.clientPortalView, initialView || 'dashboard'));
   const [profileDraft, setProfileDraft] = useState({
     full_name: authProfile?.full_name || '',
     phone: authProfile?.phone || '',
@@ -4919,8 +5013,15 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   ];
 
   useEffect(() => {
-    setView(initialView || 'dashboard');
+    const storedView = readLocalData(uiStateKeys.clientPortalView, '');
+    const nextView = storedView || initialView || 'dashboard';
+    setView((current) => (current === nextView ? current : nextView));
   }, [initialView]);
+
+  function changeView(nextView) {
+    setView(nextView);
+    writeLocalData(uiStateKeys.clientPortalView, nextView);
+  }
 
   async function submitProfile(event) {
     event.preventDefault();
@@ -4973,7 +5074,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                 className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 lg:py-3 ${
                   view === key ? 'bg-ink text-white' : 'hover:bg-mist'
                 }`}
-                onClick={() => setView(key)}
+                onClick={() => changeView(key)}
               >
                 <PanelIcon icon={icon} size={18} />
                 {label}
@@ -5011,7 +5112,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                         : 'Nenhuma solicitação ativa no momento.'}
                     </p>
                   </div>
-                  <Button type="button" variant="outline" onClick={() => setView('reservations')}>
+                  <Button type="button" variant="outline" onClick={() => changeView('reservations')}>
                     Ver reservas
                   </Button>
                 </div>
@@ -5449,13 +5550,15 @@ function AdminPanel({
   updateReservationStatus,
   initialView = 'dashboard',
 }) {
+  const ownerPropertyDraftKey = `ui:ownerNewProperty:${authProfile?.id || 'anonymous'}`;
+  const ownerPropertyDraftOpenKey = `${ownerPropertyDraftKey}:open`;
   const [login, setLogin] = useState({ email: adminEmail, password: '' });
   const [loginError, setLoginError] = useState('');
   const [loginNotice, setLoginNotice] = useState('');
   const [expandedReservationId, setExpandedReservationId] = useState('');
-  const [showNewProperty, setShowNewProperty] = useState(false);
+  const [showNewProperty, setShowNewProperty] = useState(() => readLocalData(ownerPropertyDraftOpenKey, false));
   const [reportType, setReportType] = useState('summary');
-  const [adminView, setAdminView] = useState(initialView);
+  const [adminView, setAdminView] = useState(() => readLocalData(uiStateKeys.adminView, initialView || 'dashboard'));
   const [adminNotice, setAdminNotice] = useState('');
   const [licenseNotice, setLicenseNotice] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
@@ -5512,16 +5615,7 @@ function AdminPanel({
     amenities: property.amenities?.join(', ') || '',
     rules: property.rules?.join('\n') || '',
   });
-  const [newProperty, setNewProperty] = useState({
-    ...emptyProperty,
-    name: '',
-    city: '',
-    maps_url: '',
-    headline: '',
-    description: '',
-    amenities: '',
-    rules: '',
-  });
+  const [newProperty, setNewProperty] = useState(() => readLocalData(ownerPropertyDraftKey, createEmptyPropertyDraft()));
   const [photo, setPhoto] = useState({ url: '', alt: '' });
   const [licenseDrafts, setLicenseDrafts] = useState(() =>
     Object.fromEntries(
@@ -5591,8 +5685,29 @@ function AdminPanel({
       : 'Licença ativa necessária para cadastrar casas.';
 
   useEffect(() => {
-    setAdminView(initialView || 'dashboard');
+    const storedView = readLocalData(uiStateKeys.adminView, '');
+    const nextView = storedView || initialView || 'dashboard';
+    setAdminView((current) => (current === nextView ? current : nextView));
   }, [initialView]);
+
+  function changeAdminView(nextView) {
+    setAdminView(nextView);
+    writeLocalData(uiStateKeys.adminView, nextView);
+  }
+
+  useEffect(() => {
+    setShowNewProperty(readLocalData(ownerPropertyDraftOpenKey, false));
+    setNewProperty(readLocalData(ownerPropertyDraftKey, createEmptyPropertyDraft()));
+  }, [ownerPropertyDraftKey, ownerPropertyDraftOpenKey]);
+
+  useEffect(() => {
+    writeLocalData(ownerPropertyDraftOpenKey, Boolean(showNewProperty));
+  }, [ownerPropertyDraftOpenKey, showNewProperty]);
+
+  useEffect(() => {
+    if (!showNewProperty) return;
+    writeLocalData(ownerPropertyDraftKey, newProperty);
+  }, [newProperty, ownerPropertyDraftKey, showNewProperty]);
 
   useEffect(() => {
     setDraft({
@@ -5742,16 +5857,10 @@ function AdminPanel({
       rules: parseAdminList(newProperty.rules),
     });
     if (!created) return;
-    setNewProperty({
-      ...emptyProperty,
-      name: '',
-      city: '',
-      headline: '',
-      description: '',
-      maps_url: '',
-      amenities: '',
-      rules: '',
-    });
+    const cleanDraft = createEmptyPropertyDraft();
+    setNewProperty(cleanDraft);
+    writeLocalData(ownerPropertyDraftKey, cleanDraft);
+    writeLocalData(ownerPropertyDraftOpenKey, false);
     setShowNewProperty(false);
   }
 
@@ -5811,16 +5920,7 @@ function AdminPanel({
         ? ''
         : `Você ainda pode cadastrar ${freshLimitState.remainingProperties} casa(s).`,
     );
-    setNewProperty({
-      ...emptyProperty,
-      name: '',
-      city: '',
-      headline: '',
-      description: '',
-      maps_url: '',
-      amenities: '',
-      rules: '',
-    });
+    setNewProperty(readLocalData(ownerPropertyDraftKey, createEmptyPropertyDraft()));
     setShowNewProperty(true);
   }
 
@@ -6441,7 +6541,7 @@ function AdminPanel({
                     className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 ${
                       adminView === key ? 'bg-ink text-white' : 'hover:bg-mist'
                     }`}
-                    onClick={() => setAdminView(key)}
+                    onClick={() => changeAdminView(key)}
                   >
                     <PanelIcon icon={icon} size={18} />
                     {label}

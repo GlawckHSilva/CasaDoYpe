@@ -33,12 +33,12 @@ function jsonError(req: Request, message: string, status: number, code: string, 
 }
 
 function getBearerToken(req: Request) {
-  return (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  return (req.headers.get('authorization') || req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
 }
 
 function isMissingRelationError(error: { code?: string; message?: string } | null | undefined) {
   const message = error?.message || '';
-  return error?.code === '42P01' || /relation .* does not exist|table .* does not exist/i.test(message);
+  return error?.code === '42P01' || error?.code === '42703' || /relation .* does not exist|table .* does not exist|column .* does not exist/i.test(message);
 }
 
 function buildDbError(table: string, error: { message?: string; code?: string; details?: string } | null) {
@@ -211,6 +211,14 @@ Deno.serve(async (req) => {
         true,
       );
       if (paymentSettingsByPropertyError) return paymentSettingsByPropertyError;
+
+      const reservationsByPropertyError = await deleteRows(
+        req,
+        adminClient.from('reservations').delete().in('property_id', propertyIds),
+        'reservations',
+        true,
+      );
+      if (reservationsByPropertyError) return reservationsByPropertyError;
     }
 
     const userScopedDeletes = [
