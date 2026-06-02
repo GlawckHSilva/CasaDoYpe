@@ -814,6 +814,57 @@ function getVoucherSummary(reservations) {
   };
 }
 
+function getMovementAmount(movement) {
+  return Math.max(0, Number(movement?.amount || 0));
+}
+
+function isExpenseMovement(movement) {
+  return movement?.type === 'expense';
+}
+
+function isIncomeMovement(movement) {
+  return !isExpenseMovement(movement);
+}
+
+function calculateFinancialSummary(cashMovements = [], reservations = []) {
+  const received = cashMovements
+    .filter((movement) => isIncomeMovement(movement) && movement.status === 'received')
+    .reduce((sum, movement) => sum + getMovementAmount(movement), 0);
+  const receivableFromMovements = cashMovements
+    .filter((movement) => isIncomeMovement(movement) && movement.status !== 'received' && !movement.reservation_id)
+    .reduce((sum, movement) => sum + getMovementAmount(movement), 0);
+  const receivableFromReservations = reservations
+    .filter((reservation) => ['pending', 'confirmed'].includes(reservation.status))
+    .filter((reservation) => reservation.payment_status !== 'paid')
+    .reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
+  const spent = cashMovements
+    .filter((movement) => isExpenseMovement(movement))
+    .reduce((sum, movement) => sum + getMovementAmount(movement), 0);
+  const receivable = receivableFromReservations + receivableFromMovements;
+  const total = received + receivable - spent;
+
+  return { received, receivable, spent, total, forecast: total };
+}
+
+function buildMonthlyFinancialRows(cashMovements = []) {
+  const grouped = new Map();
+  cashMovements.forEach((movement) => {
+    const key = String(movement.paid_at || movement.due_date || movement.created_at || '').slice(0, 7) || 'Sem data';
+    const current = grouped.get(key) || { monthKey: key, income: 0, expense: 0, total: 0 };
+    if (isExpenseMovement(movement)) {
+      current.expense += getMovementAmount(movement);
+    } else {
+      current.income += getMovementAmount(movement);
+    }
+    current.total = current.income - current.expense;
+    grouped.set(key, current);
+  });
+
+  const rows = Array.from(grouped.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey)).slice(-6);
+  const max = Math.max(...rows.map((row) => Math.abs(row.total)), ...rows.map((row) => row.income), ...rows.map((row) => row.expense), 1);
+  return rows.map((row) => ({ ...row, percentage: Math.max(8, Math.round((Math.abs(row.total) / max) * 100)) }));
+}
+
 function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -1110,16 +1161,10 @@ export default function App() {
     () => cashMovements.filter((movement) => movement.property_id === adminProperty.id),
     [cashMovements, adminProperty.id],
   );
-  const adminFinancialSummary = useMemo(() => {
-    const received = adminPropertyCashMovements
-      .filter((movement) => movement.type === 'income' && movement.status === 'received')
-      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
-    const receivable = adminPropertyReservations
-      .filter((reservation) => ['pending', 'confirmed'].includes(reservation.status))
-      .filter((reservation) => reservation.payment_status !== 'paid')
-      .reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
-    return { received, receivable, forecast: received + receivable };
-  }, [adminPropertyCashMovements, adminPropertyReservations]);
+  const adminFinancialSummary = useMemo(
+    () => calculateFinancialSummary(adminPropertyCashMovements, adminPropertyReservations),
+    [adminPropertyCashMovements, adminPropertyReservations],
+  );
   const selectedPhotoData = propertyPhotos[selectedPhoto] || propertyPhotos[0] || placeholderPhoto;
   const heroPhoto = propertyPhotos[heroPhotoIndex] || selectedPhotoData;
   const calendarAvailability = useMemo(() => getCalendarAvailability(propertyReservations), [propertyReservations]);
@@ -1139,16 +1184,10 @@ export default function App() {
   const licenseValid =
     isLicenseValid(property) && (!propertyLicense || !['expired', 'suspended'].includes(propertyLicenseStatus));
   const voucherSummary = useMemo(() => getVoucherSummary(propertyReservations), [propertyReservations]);
-  const financialSummary = useMemo(() => {
-    const received = propertyCashMovements
-      .filter((movement) => movement.type === 'income' && movement.status === 'received')
-      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
-    const receivable = propertyReservations
-      .filter((reservation) => ['pending', 'confirmed'].includes(reservation.status))
-      .filter((reservation) => reservation.payment_status !== 'paid')
-      .reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
-    return { received, receivable, forecast: received + receivable };
-  }, [propertyCashMovements, propertyReservations]);
+  const financialSummary = useMemo(
+    () => calculateFinancialSummary(propertyCashMovements, propertyReservations),
+    [propertyCashMovements, propertyReservations],
+  );
   const canBook =
     nights > 0 &&
     !reservationConflict &&
@@ -3745,7 +3784,7 @@ function SuperAdminDashboard({
     activeClients: licenses.filter((license) => ['active', 'trial'].includes(normalizeLicenseStatus(license))).length,
     monthlyRevenue: cashMovements
       .filter((movement) => String(movement.due_date || '').slice(0, 7) === format(new Date(), 'yyyy-MM'))
-      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0),
+      .reduce((sum, movement) => sum + (isExpenseMovement(movement) ? -getMovementAmount(movement) : getMovementAmount(movement)), 0),
   };
   const monthlyChart = buildMonthlyRows(cashMovements, reservations);
   const growthChart = buildGrowthRows(profiles);
@@ -4078,7 +4117,7 @@ function SuperAdminDashboard({
                 <SuperStat icon="group" label="Hóspedes" value={stats.guests} />
                 <SuperStat icon="home_work" label="Imóveis" value={stats.properties} />
                 <SuperStat icon="event_available" label="Reservas" value={stats.reservations} />
-                <SuperStat icon="payments" label="Receita mensal" value={currency.format(stats.monthlyRevenue)} />
+                <SuperStat icon="payments" label="Resultado mensal" value={currency.format(stats.monthlyRevenue)} />
                 <SuperStat icon="pending_actions" label="Pendentes" value={stats.pending} />
                 <SuperStat icon="task_alt" label="Confirmadas" value={stats.confirmed} />
                 <SuperStat icon="cancel" label="Canceladas" value={stats.cancelled} />
@@ -4087,7 +4126,7 @@ function SuperAdminDashboard({
                 <SuperStat icon="verified_user" label="Clientes ativos" value={stats.activeClients} />
               </div>
               <div className="grid gap-5 xl:grid-cols-2">
-                <SuperChart title="Receita e reservas mensais" rows={monthlyChart} valueKey="revenue" labelKey="monthKey" />
+                <SuperChart title="Resultado e reservas mensais" rows={monthlyChart} valueKey="revenue" labelKey="monthKey" />
                 <SuperChart title="Crescimento de usuários" rows={growthChart} valueKey="count" labelKey="monthKey" />
               </div>
             </div>
@@ -4426,7 +4465,7 @@ function buildMonthlyRows(cashMovements, reservations) {
   cashMovements.forEach((movement) => {
     const key = String(movement.paid_at || movement.due_date || '').slice(0, 7) || 'Sem data';
     const current = grouped.get(key) || { monthKey: key, revenue: 0, reservations: 0 };
-    current.revenue += Number(movement.amount || 0);
+    current.revenue += isExpenseMovement(movement) ? -getMovementAmount(movement) : getMovementAmount(movement);
     grouped.set(key, current);
   });
   reservations.forEach((reservation) => {
@@ -4461,7 +4500,7 @@ function SuperStat({ icon, label, value }) {
 }
 
 function SuperChart({ title, rows, valueKey, labelKey }) {
-  const max = Math.max(...rows.map((row) => Number(row[valueKey] || 0)), 1);
+  const max = Math.max(...rows.map((row) => Math.abs(Number(row[valueKey] || 0))), 1);
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
       <h2 className="font-black">{title}</h2>
@@ -4471,9 +4510,12 @@ function SuperChart({ title, rows, valueKey, labelKey }) {
             <div key={row[labelKey]} className="grid gap-2 sm:grid-cols-[90px_1fr_120px] sm:items-center">
               <span className="text-xs font-bold text-ink/55">{row[labelKey]}</span>
               <div className="h-3 overflow-hidden rounded-full bg-mist">
-                <div className="h-full rounded-full bg-leaf" style={{ width: `${Math.max(8, (Number(row[valueKey] || 0) / max) * 100)}%` }} />
+                <div
+                  className={`h-full rounded-full ${Number(row[valueKey] || 0) < 0 ? 'bg-red-500' : 'bg-leaf'}`}
+                  style={{ width: `${Math.max(8, (Math.abs(Number(row[valueKey] || 0)) / max) * 100)}%` }}
+                />
               </div>
-              <span className="text-sm font-black sm:text-right">
+              <span className={`text-sm font-black sm:text-right ${Number(row[valueKey] || 0) < 0 ? 'text-red-700' : ''}`}>
                 {valueKey === 'revenue' ? currency.format(row[valueKey] || 0) : row[valueKey] || 0}
               </span>
             </div>
@@ -5655,21 +5697,7 @@ function AdminPanel({
   const visibleReservations = reservations.filter((reservation) => reservation.status !== 'cancelled');
   const pendingReservations = reservations.filter((reservation) => reservation.status === 'pending');
   const confirmedReservations = reservations.filter((reservation) => reservation.status === 'confirmed');
-  const monthlyRevenue = useMemo(() => {
-    const grouped = new Map();
-    cashMovements
-      .filter((movement) => movement.status === 'received')
-      .forEach((movement) => {
-        const key = String(movement.paid_at || movement.due_date || '').slice(0, 7) || 'Sem data';
-        grouped.set(key, (grouped.get(key) || 0) + Number(movement.amount || 0));
-      });
-    const rows = Array.from(grouped.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(-6)
-      .map(([monthKey, amount]) => ({ monthKey, amount }));
-    const max = Math.max(...rows.map((row) => row.amount), 1);
-    return rows.map((row) => ({ ...row, percentage: Math.max(8, Math.round((row.amount / max) * 100)) }));
-  }, [cashMovements]);
+  const monthlyFinancialRows = useMemo(() => buildMonthlyFinancialRows(cashMovements), [cashMovements]);
   const adminMenu = [
     ['dashboard', 'Dashboard', 'dashboard'],
     ['houses', 'Casas', 'home_work'],
@@ -6105,9 +6133,7 @@ function AdminPanel({
       return sum + nights;
     }, 0);
     const totalRevenue = activeReservations.reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
-    const received = cashMovements
-      .filter((movement) => movement.status === 'received')
-      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const { received, receivable, spent, total } = financialSummary;
     const occupancy = Math.round((nightsBooked / 365) * 100);
     const adr = nightsBooked ? totalRevenue / nightsBooked : 0;
     const title = reportLabels[reportType];
@@ -6123,7 +6149,9 @@ function AdminPanel({
             ['Noites confirmadas', nightsBooked],
             ['Receita prevista', currency.format(totalRevenue)],
             ['Recebido', currency.format(received)],
-            ['A receber', currency.format(Math.max(0, totalRevenue - received))],
+            ['A receber', currency.format(receivable)],
+            ['Gasto', currency.format(spent)],
+            ['Total', currency.format(total)],
             ['Ocupacao estimada no ano', `${occupancy}%`],
             ['Diaria media estimada', currency.format(adr)],
           ],
@@ -6147,8 +6175,9 @@ function AdminPanel({
           rows: [
             ['Receita prevista', currency.format(totalRevenue)],
             ['Recebido', currency.format(received)],
-            ['A receber', currency.format(Math.max(0, totalRevenue - received))],
-            ['Previsao geral', currency.format(financialSummary.forecast)],
+            ['A receber', currency.format(receivable)],
+            ['Gasto', currency.format(spent)],
+            ['Total', currency.format(total)],
           ],
         },
         {
@@ -6156,9 +6185,10 @@ function AdminPanel({
           rows: cashMovements.map((movement) => [
             movement.due_date || '-',
             movement.description || 'Lancamento',
+            isExpenseMovement(movement) ? 'Despesa' : 'Receita',
             movement.status || '-',
             paymentLabels[movement.payment_method] || movement.payment_method || '-',
-            currency.format(movement.amount || 0),
+            `${isExpenseMovement(movement) ? '-' : '+'}${currency.format(getMovementAmount(movement))}`,
           ]),
         },
       ],
@@ -6280,7 +6310,8 @@ function AdminPanel({
         ['Reservas confirmadas', activeReservations.filter((reservation) => reservation.status === 'confirmed').length],
         ['Recebido', financialSummary.received],
         ['A receber', financialSummary.receivable],
-        ['Previsão', financialSummary.forecast],
+        ['Gasto', financialSummary.spent],
+        ['Total', financialSummary.total],
       ],
       reservations: [
         ['Cliente', 'E-mail', 'Telefone', 'Check-in', 'Check-out', 'Status', 'Pagamento', 'Total'],
@@ -6296,13 +6327,14 @@ function AdminPanel({
         ]),
       ],
       financial: [
-        ['Data', 'Descrição', 'Status', 'Método', 'Valor'],
+        ['Data', 'Descrição', 'Tipo', 'Status', 'Método', 'Valor'],
         ...cashMovements.map((movement) => [
           movement.due_date || '',
           movement.description || '',
+          isExpenseMovement(movement) ? 'Despesa' : 'Receita',
           movement.status || '',
           paymentLabels[movement.payment_method] || movement.payment_method || '',
-          Number(movement.amount || 0),
+          isExpenseMovement(movement) ? -getMovementAmount(movement) : getMovementAmount(movement),
         ]),
       ],
       occupancy: [
@@ -6342,9 +6374,7 @@ function AdminPanel({
       return sum + nights;
     }, 0);
     const totalRevenue = activeReservations.reduce((sum, reservation) => sum + Number(reservation.total_amount || 0), 0);
-    const received = cashMovements
-      .filter((movement) => movement.status === 'received')
-      .reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+    const { received, receivable, spent, total } = financialSummary;
     const occupancy = Math.round((nightsBooked / 365) * 100);
     const adr = nightsBooked ? totalRevenue / nightsBooked : 0;
 
@@ -6356,6 +6386,9 @@ function AdminPanel({
         `Noites confirmadas: ${nightsBooked}`,
         `Receita prevista: ${currency.format(totalRevenue)}`,
         `Recebido: ${currency.format(received)}`,
+        `A receber: ${currency.format(receivable)}`,
+        `Gasto: ${currency.format(spent)}`,
+        `Total: ${currency.format(total)}`,
         `Ocupação estimada no ano: ${occupancy}%`,
         `Diária média estimada: ${currency.format(adr)}`,
       ],
@@ -6366,11 +6399,13 @@ function AdminPanel({
       financial: [
         `Receita prevista: ${currency.format(totalRevenue)}`,
         `Recebido: ${currency.format(received)}`,
-        `A receber: ${currency.format(Math.max(0, totalRevenue - received))}`,
+        `A receber: ${currency.format(receivable)}`,
+        `Gasto: ${currency.format(spent)}`,
+        `Total: ${currency.format(total)}`,
         '',
         ...cashMovements.map(
           (movement) =>
-            `${movement.due_date} | ${movement.description || 'Lançamento'} | ${movement.status} | ${currency.format(movement.amount || 0)}`,
+            `${movement.due_date} | ${movement.description || 'Lançamento'} | ${isExpenseMovement(movement) ? 'Despesa' : 'Receita'} | ${movement.status} | ${isExpenseMovement(movement) ? '-' : '+'}${currency.format(getMovementAmount(movement))}`,
         ),
       ],
       occupancy: [
@@ -7013,12 +7048,13 @@ function AdminPanel({
             <section className={`${adminView === 'cash' ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}>
               <div>
                 <h3 className="text-xl font-black">Caixa</h3>
-                <p className="mt-1 text-sm text-ink/65">Acompanhe o que entrou e o que ainda tem para receber.</p>
+                <p className="mt-1 text-sm text-ink/65">Acompanhe receitas, despesas e o resultado líquido da casa.</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <FinanceCard icon={Banknote} label="Recebido" value={currency.format(financialSummary.received)} />
-                <FinanceCard icon={CreditCard} label="A receber" value={currency.format(financialSummary.receivable)} />
-                <FinanceCard icon={CalendarDays} label="Previsão" value={currency.format(financialSummary.forecast)} />
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <FinanceCard icon={Wallet} label="Recebido" value={currency.format(financialSummary.received)} />
+                <FinanceCard icon={CalendarDays} label="A receber" value={currency.format(financialSummary.receivable)} />
+                <FinanceCard icon={CreditCard} label="Gasto" value={currency.format(financialSummary.spent)} />
+                <FinanceCard icon={BarChart3} label="Total" value={currency.format(financialSummary.total)} />
               </div>
               <form className="grid gap-4 rounded-md bg-[#f4f8ff] p-4 shadow-sm" onSubmit={submitCashMovement}>
                 <h4 className="font-black">Adicionar movimentação</h4>
@@ -7043,8 +7079,17 @@ function AdminPanel({
                   </Field>
                   <Field label="Status">
                     <SelectInput value={cashDraft.status} onChange={(event) => setCashDraft({ ...cashDraft, status: event.target.value })}>
-                      <option value="received">Já recebeu</option>
-                      <option value="expected">A receber</option>
+                      {cashDraft.type === 'expense' ? (
+                        <>
+                          <option value="received">Pago</option>
+                          <option value="expected">A pagar</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="received">Já recebeu</option>
+                          <option value="expected">A receber</option>
+                        </>
+                      )}
                     </SelectInput>
                   </Field>
                   <Field label="Data">
@@ -7061,33 +7106,57 @@ function AdminPanel({
               </form>
               <div className="rounded-md bg-white p-4 shadow-sm">
                 <p className="text-sm font-black">Faturamento mensal</p>
-                {monthlyRevenue.length ? (
+                <p className="mt-1 text-xs font-semibold text-ink/55">Receitas, despesas e total líquido por mês.</p>
+                {monthlyFinancialRows.length ? (
                   <div className="mt-4 grid gap-3">
-                    {monthlyRevenue.map((row) => (
-                      <div key={row.monthKey} className="grid gap-2 sm:grid-cols-[80px_1fr_120px] sm:items-center">
+                    {monthlyFinancialRows.map((row) => (
+                      <div key={row.monthKey} className="grid gap-2 rounded-md border border-ink/10 p-3 sm:grid-cols-[80px_1fr_auto] sm:items-center">
                         <span className="text-xs font-bold text-ink/55">{row.monthKey}</span>
-                        <div className="h-3 overflow-hidden rounded-full bg-mist">
-                          <div className="h-full rounded-full bg-leaf" style={{ width: `${row.percentage}%` }} />
+                        <div>
+                          <div className="h-3 overflow-hidden rounded-full bg-mist">
+                            <div
+                              className={`h-full rounded-full ${row.total < 0 ? 'bg-red-500' : 'bg-leaf'}`}
+                              style={{ width: `${row.percentage}%` }}
+                            />
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold text-ink/60">
+                            <span>Receitas: {currency.format(row.income)}</span>
+                            <span>Despesas: {currency.format(row.expense)}</span>
+                          </div>
                         </div>
-                        <span className="text-sm font-black sm:text-right">{currency.format(row.amount)}</span>
+                        <span className={`text-sm font-black sm:text-right ${row.total < 0 ? 'text-red-700' : 'text-leaf'}`}>
+                          {currency.format(row.total)}
+                        </span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-3 text-sm text-ink/60">Sem recebimentos para montar o gráfico.</p>
+                  <p className="mt-3 text-sm text-ink/60">Sem lançamentos para montar o gráfico.</p>
                 )}
               </div>
               <div className="grid gap-2 rounded-md bg-white p-4 shadow-sm">
                 <p className="text-sm font-black">Últimos lançamentos</p>
                 {cashMovements.length ? (
                   cashMovements.slice(0, 5).map((movement) => (
-                    <div key={movement.id} className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-ink/70">{movement.description}</span>
-                      <span className="font-bold">{currency.format(movement.amount || 0)}</span>
+                    <div key={movement.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-ink/10 px-3 py-2 text-sm">
+                      <div className="min-w-0">
+                        <span
+                          className={`mr-2 inline-flex rounded-md px-2 py-1 text-[11px] font-black ${
+                            isExpenseMovement(movement) ? 'bg-red-50 text-red-700' : 'bg-leaf/10 text-leaf'
+                          }`}
+                        >
+                          {isExpenseMovement(movement) ? 'Despesa' : 'Receita'}
+                        </span>
+                        <span className="break-words text-ink/70">{movement.description}</span>
+                      </div>
+                      <span className={`font-black ${isExpenseMovement(movement) ? 'text-red-700' : 'text-leaf'}`}>
+                        {isExpenseMovement(movement) ? '-' : '+'}
+                        {currency.format(getMovementAmount(movement))}
+                      </span>
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-ink/60">Nenhum recebimento registrado ainda.</p>
+                  <p className="text-sm text-ink/60">Nenhum lançamento registrado ainda.</p>
                 )}
               </div>
             </section>
