@@ -529,22 +529,31 @@ async function safeSupabaseQuery(query, timeoutMs = 12000, timeoutMessage = 'Con
   }
 }
 
-function normalizeFunctionErrorMessage(message, fallback = 'Erro interno ao executar a função.') {
+function normalizeFunctionErrorMessage(message, fallback = 'Erro interno ao executar a função.', code = '', status = 0) {
   const text = String(message || '').trim();
-  if (!text) return fallback;
-  if (/^unauthorized\.?$/i.test(text) || /missing_auth_token|invalid_session|jwt|token expired|sess[aã]o invalida|sess[aã]o expirada/i.test(text)) {
-    return 'Sessão expirada. Faça login novamente.';
+  const codeText = String(code || '').trim();
+  const combined = `${codeText} ${text}`.trim();
+  const searchable = combined || String(status || '');
+  if (!text && !codeText) return fallback;
+  if (/missing_auth_token|token de sess[aã]o n[aã]o enviado|^unauthorized\.?$/i.test(searchable)) {
+    return 'Token de sessão não enviado para a Edge Function.';
   }
-  if (/not_super_admin|only super admins|permission|permiss/i.test(text)) {
+  if (/invalid_session|jwt|token expired|usu[aá]rio autenticado n[aã]o encontrado|sess[aã]o inv[aá]lida|sess[aã]o expirada/i.test(searchable)) {
+    return 'Usuário autenticado não encontrado. Faça login novamente.';
+  }
+  if (/requester_profile_missing|perfil super_admin n[aã]o encontrado|perfil .*n[aã]o encontrado/i.test(searchable)) {
+    return 'Perfil super_admin não encontrado.';
+  }
+  if (/not_super_admin|only super admins|permission|permiss/i.test(searchable)) {
     return 'Você não tem permissão para excluir usuários.';
   }
-  if (/missing_service_role|service role/i.test(text)) {
-    return 'Edge Function sem service_role configurada.';
+  if (/missing_service_role|service role/i.test(searchable)) {
+    return 'Service role não configurada na Edge Function.';
   }
-  if (/missing_supabase_url|supabase_url/i.test(text)) {
+  if (/missing_supabase_url|supabase_url/i.test(searchable)) {
     return 'Edge Function sem SUPABASE_URL configurada.';
   }
-  if (/user_not_found|usuario nao encontrado|usu[aá]rio n[aã]o encontrado|not found/i.test(text)) {
+  if (/user_not_found|usuario nao encontrado|usu[aá]rio n[aã]o encontrado|not found/i.test(searchable)) {
     return 'Usuário alvo não encontrado.';
   }
   return text;
@@ -557,13 +566,14 @@ async function getFunctionErrorMessage(error, fallback = 'Erro interno ao execut
       const contentType = response.headers?.get?.('content-type') || '';
       if (contentType.includes('application/json')) {
         const body = await response.json();
-        if (typeof body?.error === 'string') return normalizeFunctionErrorMessage(body.error, fallback);
-        if (typeof body?.message === 'string') return normalizeFunctionErrorMessage(body.message, fallback);
-        if (typeof body?.detail === 'string') return normalizeFunctionErrorMessage(body.detail, fallback);
+        const code = body?.code || '';
+        if (typeof body?.error === 'string') return normalizeFunctionErrorMessage(body.error, fallback, code, response.status);
+        if (typeof body?.message === 'string') return normalizeFunctionErrorMessage(body.message, fallback, code, response.status);
+        if (typeof body?.detail === 'string') return normalizeFunctionErrorMessage(body.detail, fallback, code, response.status);
       }
 
       const text = await response.text();
-      if (text) return normalizeFunctionErrorMessage(text, fallback);
+      if (text) return normalizeFunctionErrorMessage(text, fallback, '', response.status);
     }
   } catch (_parseError) {
     // Keep the user-facing fallback instead of surfacing a parser failure.
@@ -3877,11 +3887,6 @@ function SuperAdminDashboard({
       );
       let session = sessionData?.session || null;
       if (sessionError || !session?.access_token) {
-        setUserNotice('Sessão expirada. Faça login novamente.');
-        return;
-      }
-      const expiresAtMs = Number(session.expires_at || 0) * 1000;
-      if (expiresAtMs && expiresAtMs < Date.now() + 30000) {
         const { data: refreshedData, error: refreshError } = await safeSupabaseQuery(
           supabase.auth.refreshSession(),
           authRequestTimeoutMs,
@@ -3891,17 +3896,42 @@ function SuperAdminDashboard({
           session = refreshedData.session;
         }
       }
-      const { data, error } = await supabase.functions.invoke('delete-user-cascade', {
-        body: { userId: profile.id, user_id: profile.id, email: profile.email },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
+      let expiresAtMs = Number(session?.expires_at || 0) * 1000;
+      if (expiresAtMs && expiresAtMs < Date.now() + 30000) {
+        const { data: refreshedData, error: refreshError } = await safeSupabaseQuery(
+          supabase.auth.refreshSession(),
+          authRequestTimeoutMs,
+          'Renovação da sessão excedeu o tempo limite.',
+        );
+        if (!refreshError && refreshedData?.session?.access_token) {
+          session = refreshedData.session;
+          expiresAtMs = Number(session?.expires_at || 0) * 1000;
+        }
+      }
+      if (!session?.access_token) {
+        setUserNotice('Token de sessão não enviado para a Edge Function.');
+        return;
+      }
+      if (expiresAtMs && expiresAtMs < Date.now()) {
+        setUserNotice('Usuário autenticado não encontrado. Faça login novamente.');
+        return;
+      }
+      const authorizationHeader = `Bearer ${session.access_token}`;
+      const { data, error } = await safeSupabaseQuery(
+        supabase.functions.invoke('delete-user-cascade', {
+          body: { userId: profile.id, user_id: profile.id, email: profile.email },
+          headers: { Authorization: authorizationHeader },
+        }),
+        15000,
+        'Exclusão de usuário excedeu o tempo limite.',
+      );
       if (error) {
         const message = await getFunctionErrorMessage(error, 'Edge Function não configurada ou não publicada.');
         setUserNotice(`Não foi possível excluir: ${message}`);
         return;
       }
       if (data?.error) {
-        setUserNotice(`Não foi possível excluir: ${normalizeFunctionErrorMessage(data.error, 'Erro interno ao excluir usuário.')}`);
+        setUserNotice(`Não foi possível excluir: ${normalizeFunctionErrorMessage(data.error, 'Erro interno ao excluir usuário.', data.code)}`);
         return;
       }
     }

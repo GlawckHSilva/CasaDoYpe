@@ -77,12 +77,12 @@ Deno.serve(async (req) => {
       return jsonError(req, 'Edge Function nao configurada: SUPABASE_URL ausente.', 500, 'missing_supabase_url');
     }
     if (!serviceRoleKey) {
-      return jsonError(req, 'Service role ausente.', 500, 'missing_service_role');
+      return jsonError(req, 'Service role nao configurada na Edge Function.', 500, 'missing_service_role');
     }
 
     const token = getBearerToken(req);
     if (!token) {
-      return jsonError(req, 'Voce precisa estar logado para excluir usuarios.', 401, 'missing_auth_token');
+      return jsonError(req, 'Token de sessao nao enviado para a Edge Function.', 401, 'missing_auth_token');
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
 
     const { data: requesterData, error: requesterError } = await adminClient.auth.getUser(token);
     if (requesterError || !requesterData.user) {
-      return jsonError(req, 'Sessao invalida ou expirada.', 401, 'invalid_session');
+      return jsonError(req, 'Usuario autenticado nao encontrado.', 401, 'invalid_session', requesterError?.message);
     }
 
     const { data: requesterProfile, error: requesterProfileError } = await adminClient
@@ -101,9 +101,12 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (requesterProfileError) {
-      return jsonError(req, 'Erro interno ao validar permissao.', 500, 'requester_profile_error', requesterProfileError.message);
+      return jsonError(req, 'Erro interno ao validar perfil super_admin.', 500, 'requester_profile_error', requesterProfileError.message);
     }
-    if (requesterProfile?.role !== 'super_admin') {
+    if (!requesterProfile) {
+      return jsonError(req, 'Perfil super_admin nao encontrado.', 403, 'requester_profile_missing');
+    }
+    if (String(requesterProfile.role || '').toLowerCase() !== 'super_admin') {
       return jsonError(req, 'Voce nao tem permissao para excluir usuarios.', 403, 'not_super_admin');
     }
 
