@@ -320,6 +320,7 @@ function createEmptyPlatformMovementDraft(type = 'income') {
     owner_id: '',
     owner_name: '',
     owner_document: '',
+    license_id: '',
     plan: '',
     property_limit: 1,
     amount: '',
@@ -983,6 +984,22 @@ function isPlatformReceivable(movement) {
   return movement?.type === 'income' && movement?.status === 'expected';
 }
 
+function isPlatformPaidExpense(movement) {
+  return isPlatformExpenseMovement(movement) && ['paid', 'received'].includes(movement?.status);
+}
+
+function isPlatformPayableExpense(movement) {
+  return isPlatformExpenseMovement(movement) && movement?.status === 'expected';
+}
+
+function getPlatformFinanceStatusLabel(movement) {
+  if (movement?.type === 'expense' && movement?.status === 'expected') return 'A pagar';
+  if (movement?.type === 'expense' && ['paid', 'received'].includes(movement?.status)) return 'Pago';
+  if (movement?.type === 'income' && movement?.status === 'expected') return 'A receber';
+  if (movement?.type === 'income' && ['paid', 'received'].includes(movement?.status)) return 'Recebido';
+  return platformFinanceStatusLabels[movement?.status] || movement?.status || '-';
+}
+
 function getOwnerDocument(ownerId, propertyId, paymentSettings = []) {
   return (
     paymentSettings.find((item) => item.owner_id === ownerId && item.bank_document)?.bank_document ||
@@ -997,13 +1014,14 @@ function buildLicensePlatformMovement(license, profiles = [], properties = [], p
   const status = normalizeLicenseStatus(license);
   const plan = license.plan || 'mensal';
   const amount = getPlatformPlanAmount(plan, license.monthly_value);
+  const ownerLabel = owner?.full_name || owner?.email || 'proprietario';
 
   return {
     id: `${source}-${license.id}`,
     type: 'income',
     status: status === 'active' ? 'received' : 'expected',
     source,
-    description: `${source === 'renewal' ? 'Renovacao' : 'Licenca'} ${plan}`,
+    description: `${source === 'renewal' ? 'Renovacao' : 'Licenca'} ${plan} - ${ownerLabel}`,
     owner_id: license.owner_id || '',
     owner_name: owner?.full_name || owner?.email || 'Proprietario nao informado',
     owner_document: getOwnerDocument(license.owner_id, license.property_id, paymentSettings),
@@ -1050,9 +1068,12 @@ function calculatePlatformFinanceSummary(movements = []) {
     .filter(isPlatformReceivable)
     .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
   const spent = activeRows
-    .filter(isPlatformExpenseMovement)
+    .filter(isPlatformPaidExpense)
     .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
-  return { received, receivable, spent, total: received + receivable - spent };
+  const payable = activeRows
+    .filter(isPlatformPayableExpense)
+    .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  return { received, receivable, spent, payable, total: received + receivable - spent - payable };
 }
 
 function buildPlatformMonthlyRows(movements = []) {
@@ -1064,6 +1085,7 @@ function buildPlatformMonthlyRows(movements = []) {
       const current = grouped.get(key) || { monthKey: key, income: 0, expense: 0, total: 0, licensesSold: 0 };
       if (isPlatformExpenseMovement(movement)) {
         current.expense += getPlatformMovementAmount(movement);
+        if (isPlatformPayableExpense(movement)) current.payable = (current.payable || 0) + getPlatformMovementAmount(movement);
       } else {
         current.income += getPlatformMovementAmount(movement);
         if (['license', 'renewal', 'upgrade'].includes(movement.source)) current.licensesSold += 1;
@@ -1085,19 +1107,23 @@ function calculatePlatformReports(movements = [], licenses = []) {
   const incomeTotal = (rows) =>
     rows.filter((movement) => movement.type === 'income').reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
   const expenseTotal = (rows) =>
-    rows.filter(isPlatformExpenseMovement).reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+    rows.filter(isPlatformPaidExpense).reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  const payableTotal = (rows) =>
+    rows.filter(isPlatformPayableExpense).reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
   const monthlyRows = activeRows.filter((movement) => String(movement.due_date || movement.created_at || '').startsWith(monthKey));
   const annualRows = activeRows.filter((movement) => String(movement.due_date || movement.created_at || '').startsWith(yearKey));
   const received = activeRows
     .filter((movement) => movement.type === 'income' && isPlatformReceived(movement))
     .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
   const spent = expenseTotal(activeRows);
+  const payable = payableTotal(activeRows);
   return {
-    monthlyRevenue: incomeTotal(monthlyRows) - expenseTotal(monthlyRows),
-    annualRevenue: incomeTotal(annualRows) - expenseTotal(annualRows),
+    monthlyRevenue: incomeTotal(monthlyRows) - expenseTotal(monthlyRows) - payableTotal(monthlyRows),
+    annualRevenue: incomeTotal(annualRows) - expenseTotal(annualRows) - payableTotal(annualRows),
     totalReceived: received,
     totalSpent: spent,
-    netProfit: received - spent,
+    totalPayable: payable,
+    netProfit: received - spent - payable,
     activeLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'active').length,
     expiredLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'expired').length,
     blockedLicenses: licenses.filter((license) => ['blocked', 'suspended'].includes(normalizeLicenseStatus(license))).length,
@@ -4363,6 +4389,19 @@ function SuperAdminDashboard({
         next.owner_name = owner?.full_name || owner?.email || '';
         next.owner_document = getOwnerDocument(value, '', paymentSettings);
       }
+      if (field === 'license_id') {
+        const license = licenses.find((item) => item.id === value);
+        const owner = profiles.find((profile) => profile.id === license?.owner_id);
+        if (license) {
+          next.owner_id = license.owner_id || '';
+          next.owner_name = owner?.full_name || owner?.email || '';
+          next.owner_document = getOwnerDocument(license.owner_id, license.property_id, paymentSettings);
+          next.plan = license.plan || next.plan;
+          next.property_limit = license.property_limit || next.property_limit;
+          next.amount = getPlatformPlanAmount(license.plan, license.monthly_value);
+          next.description = `${next.type === 'expense' ? 'Despesa relacionada' : 'Pagamento de licença'} - ${owner?.full_name || owner?.email || 'proprietário'}`;
+        }
+      }
       if (field === 'plan' && !Number(next.amount || 0)) {
         next.amount = getPlatformPlanAmount(value);
       }
@@ -4593,6 +4632,7 @@ function SuperAdminDashboard({
               monthlyRows={platformMonthlyRows}
               rows={visiblePlatformFinanceRows}
               owners={owners}
+              licenses={licenses}
               draft={platformFinanceDraft}
               formOpen={platformFinanceFormOpen}
               notice={userNotice}
@@ -5013,6 +5053,7 @@ function PlatformFinancialDashboard({
   monthlyRows,
   rows,
   owners,
+  licenses,
   draft,
   formOpen,
   notice,
@@ -5026,6 +5067,7 @@ function PlatformFinancialDashboard({
     ['Faturamento anual', currency.format(reports.annualRevenue), ChartColumnIncreasing],
     ['Total recebido', currency.format(reports.totalReceived), Wallet],
     ['Total gasto', currency.format(reports.totalSpent), CreditCard],
+    ['A pagar', currency.format(reports.totalPayable || 0), CalendarDays],
     ['Lucro líquido', currency.format(reports.netProfit), BadgeDollarSign],
     ['Licenças ativas', reports.activeLicenses, ShieldCheck],
     ['Licenças vencidas', reports.expiredLicenses, AlertTriangle],
@@ -5113,6 +5155,19 @@ function PlatformFinancialDashboard({
                   ))}
                 </SelectInput>
               </Field>
+              <Field label="Licença relacionada">
+                <SelectInput value={draft.license_id || ''} onChange={(event) => onDraftChange('license_id', event.target.value)}>
+                  <option value="">Sem licença vinculada</option>
+                  {licenses.map((license) => {
+                    const owner = owners.find((item) => item.id === license.owner_id);
+                    return (
+                      <option key={license.id} value={license.id}>
+                        {license.license_key || license.plan} - {owner?.full_name || owner?.email || 'proprietário'}
+                      </option>
+                    );
+                  })}
+                </SelectInput>
+              </Field>
               <Field label="CPF/CNPJ">
                 <TextInput value={draft.owner_document} onChange={(event) => onDraftChange('owner_document', event.target.value)} />
               </Field>
@@ -5139,10 +5194,11 @@ function PlatformFinancialDashboard({
         ) : null}
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <FinanceCard icon={Wallet} label="Recebido" value={currency.format(summary.received)} />
         <FinanceCard icon={CalendarDays} label="A receber" value={currency.format(summary.receivable)} />
         <FinanceCard icon={CreditCard} label="Gasto" value={currency.format(summary.spent)} />
+        <FinanceCard icon={AlertTriangle} label="A pagar" value={currency.format(summary.payable || 0)} />
         <FinanceCard icon={BarChart3} label="Total" value={currency.format(summary.total)} />
       </section>
 
@@ -5181,7 +5237,7 @@ function PlatformFinancialDashboard({
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold text-ink/60">
                       <span>Receitas: {currency.format(row.income)}</span>
-                      <span>Despesas: {currency.format(row.expense)}</span>
+                      <span>Saídas: {currency.format(row.expense)}</span>
                       <span>Lucro: {currency.format(row.total)}</span>
                     </div>
                   </div>
@@ -5233,7 +5289,7 @@ function PlatformFinancialDashboard({
                   <span>Casas: {movement.property_limit || '-'}</span>
                   <span>Data: {movement.due_date || String(movement.created_at || '').slice(0, 10) || '-'}</span>
                   <span>Forma: {platformPaymentMethodLabels[movement.payment_method] || movement.payment_method || '-'}</span>
-                  <span>Status: {platformFinanceStatusLabels[movement.status] || movement.status || '-'}</span>
+                  <span>Status: {getPlatformFinanceStatusLabel(movement)}</span>
                 </div>
                 <p className={`text-lg font-black xl:text-right ${expense ? 'text-red-700' : 'text-leaf'}`}>
                   {expense ? '-' : '+'}
