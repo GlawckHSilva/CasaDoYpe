@@ -274,6 +274,20 @@ const defaultInterestRates = [
   { installments: 4, rate: 7 },
 ];
 
+function createEmptyLicenseDraft() {
+  return {
+    owner_id: '',
+    property_id: '',
+    plan: 'mensal',
+    status: 'trial',
+    starts_at: format(new Date(), 'yyyy-MM-dd'),
+    expires_at: format(addDays(new Date(), 3), 'yyyy-MM-dd'),
+    monthly_value: 0,
+    property_limit: 1,
+    notes: '',
+  };
+}
+
 const reservationStatusLabels = {
   pending: 'Pendente',
   confirmed: 'Confirmado',
@@ -344,6 +358,13 @@ function toDate(value) {
 
 function dateKey(date) {
   return format(date, 'yyyy-MM-dd');
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return format(date, 'dd/MM/yyyy HH:mm');
 }
 
 function getCalendarAvailability(reservations) {
@@ -3766,19 +3787,12 @@ function SuperAdminDashboard({
   );
   const [query, setQuery] = useState('');
   const [licenseEdits, setLicenseEdits] = useState({});
+  const [licenseFormOpen, setLicenseFormOpen] = useState(false);
+  const [expandedLicenseIds, setExpandedLicenseIds] = useState({});
+  const [editingLicenseId, setEditingLicenseId] = useState('');
   const [userNotice, setUserNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [licenseDraft, setLicenseDraft] = useState({
-    owner_id: '',
-    property_id: '',
-    plan: 'mensal',
-    status: 'trial',
-    starts_at: format(new Date(), 'yyyy-MM-dd'),
-    expires_at: format(addDays(new Date(), 3), 'yyyy-MM-dd'),
-    monthly_value: 0,
-    property_limit: 1,
-    notes: '',
-  });
+  const [licenseDraft, setLicenseDraft] = useState(createEmptyLicenseDraft);
   const [bannerDraft, setBannerDraft] = useState({
     title: '',
     subtitle: '',
@@ -4058,6 +4072,61 @@ function SuperAdminDashboard({
     await addAdminLog('home_banner_deleted', { banner_id: banner.id });
   }
 
+  function updateLicenseDraft(field, value) {
+    setLicenseDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function toggleLicenseDetails(licenseId) {
+    setExpandedLicenseIds((current) => ({ ...current, [licenseId]: !current[licenseId] }));
+  }
+
+  function startLicenseEdit(license) {
+    setEditingLicenseId(license.id);
+    setLicenseEdits((current) => ({
+      ...current,
+      [license.id]: {
+        plan: license.plan || '',
+        status: license.status || 'trial',
+        expires_at: license.expires_at || '',
+        monthly_value: license.monthly_value || 0,
+        property_limit: license.property_limit || 1,
+        notes: license.notes || '',
+      },
+    }));
+  }
+
+  function updateLicenseEdit(licenseId, field, value) {
+    setLicenseEdits((current) => ({
+      ...current,
+      [licenseId]: { ...current[licenseId], [field]: value },
+    }));
+  }
+
+  function cancelLicenseEdit(licenseId) {
+    setEditingLicenseId('');
+    setLicenseEdits((current) => {
+      const next = { ...current };
+      delete next[licenseId];
+      return next;
+    });
+  }
+
+  async function submitLicenseDraft(event) {
+    event.preventDefault();
+    const saved = await upsertLicense(licenseDraft);
+    if (!saved) return;
+    setLicenseDraft(createEmptyLicenseDraft());
+    setLicenseFormOpen(false);
+    setUserNotice('Licença gerada.');
+  }
+
+  async function saveLicenseEdit(license) {
+    const saved = await updateLicense(license, licenseEdits[license.id] || {});
+    if (!saved) return;
+    cancelLicenseEdit(license.id);
+    setUserNotice('Licença atualizada.');
+  }
+
   async function upsertLicense(payload) {
     const normalized = {
       ...payload,
@@ -4072,7 +4141,7 @@ function SuperAdminDashboard({
       try {
         saved = await upsertLicenseRecord(supabase, normalized);
       } catch {
-        return;
+        return null;
       }
     }
     setLicenses((current) => {
@@ -4091,14 +4160,18 @@ function SuperAdminDashboard({
       await supabase.from('license_history').insert(historyEntry);
     }
     await addAdminLog('super_admin_license_saved', { license_id: saved.id, status: saved.status });
+    return saved;
   }
 
   async function updateLicense(license, updates) {
-    await upsertLicense({ ...license, ...updates });
+    if (['suspended', 'blocked'].includes(updates.status) && updates.status !== license.status && !window.confirm('Tem certeza?')) {
+      return null;
+    }
+    return upsertLicense({ ...license, ...updates });
   }
 
   async function deleteLicense(licenseId) {
-    if (!window.confirm('Tem certeza que deseja excluir esta licença?')) return;
+    if (!window.confirm('Tem certeza?')) return;
     const deletedLicense = licenses.find((license) => license.id === licenseId);
     setLicenses((current) => current.filter((license) => license.id !== licenseId));
     if (deletedLicense?.property_id) {
@@ -4287,219 +4360,232 @@ function SuperAdminDashboard({
           ) : null}
           {view === 'licenses' ? (
             <div className="grid gap-5">
-              <form
-                className="grid gap-4 rounded-md bg-white p-4 shadow-sm"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  upsertLicense(licenseDraft);
-                  setLicenseDraft({
-                    owner_id: '',
-                    property_id: '',
-                    plan: 'mensal',
-                    status: 'trial',
-                    starts_at: format(new Date(), 'yyyy-MM-dd'),
-                    expires_at: format(addDays(new Date(), 3), 'yyyy-MM-dd'),
-                    monthly_value: 0,
-                    property_limit: 1,
-                    notes: '',
-                  });
-                }}
-              >
-                <h2 className="text-xl font-black">Gerar licença</h2>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Field label="Proprietário">
-                    <SelectInput value={licenseDraft.owner_id} onChange={(event) => setLicenseDraft({ ...licenseDraft, owner_id: event.target.value })}>
-                      <option value="">Selecione</option>
-                      {owners.map((owner) => (
-                        <option key={owner.id} value={owner.id}>
-                          {owner.email}
-                        </option>
-                      ))}
-                    </SelectInput>
-                  </Field>
-                  <Field label="Imóvel">
-                    <SelectInput value={licenseDraft.property_id} onChange={(event) => setLicenseDraft({ ...licenseDraft, property_id: event.target.value })}>
-                      <option value="">Opcional</option>
-                      {properties.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </SelectInput>
-                  </Field>
-                  <Field label="Plano">
-                    <TextInput value={licenseDraft.plan} onChange={(event) => setLicenseDraft({ ...licenseDraft, plan: event.target.value })} />
-                  </Field>
-                  <Field label="Status">
-                    <SelectInput value={licenseDraft.status} onChange={(event) => setLicenseDraft({ ...licenseDraft, status: event.target.value })}>
-                      <option value="active">Ativa</option>
-                      <option value="expired">Vencida</option>
-                      <option value="suspended">Suspensa</option>
-                      <option value="blocked">Bloqueada</option>
-                      <option value="cancelled">Cancelada</option>
-                      <option value="inactive">Inativa</option>
-                      <option value="trial">Teste</option>
-                    </SelectInput>
-                  </Field>
-                  <Field label="Início">
-                    <TextInput type="date" value={licenseDraft.starts_at} onChange={(event) => setLicenseDraft({ ...licenseDraft, starts_at: event.target.value })} />
-                  </Field>
-                  <Field label="Vencimento">
-                    <TextInput type="date" value={licenseDraft.expires_at} onChange={(event) => setLicenseDraft({ ...licenseDraft, expires_at: event.target.value })} />
-                  </Field>
-                  <Field label="Valor mensal">
-                    <TextInput type="number" value={licenseDraft.monthly_value} onChange={(event) => setLicenseDraft({ ...licenseDraft, monthly_value: event.target.value })} />
-                  </Field>
-                  <Field label="Limite de imóveis">
-                    <TextInput type="number" value={licenseDraft.property_limit} onChange={(event) => setLicenseDraft({ ...licenseDraft, property_limit: event.target.value })} />
-                  </Field>
+              <section className="rounded-md bg-white p-3 shadow-sm sm:p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-black sm:text-xl">Licenças</h2>
+                    <p className="text-sm text-ink/60">Gerencie planos, vencimentos e limites sem ocupar a tela toda.</p>
+                  </div>
+                  <Button type="button" className="w-full sm:w-auto" onClick={() => setLicenseFormOpen((current) => !current)}>
+                    <KeyRound size={18} aria-hidden="true" />
+                    {licenseFormOpen ? 'Fechar formulário' : 'Gerar licença'}
+                  </Button>
                 </div>
-                <Field label="Observações">
-                  <TextArea value={licenseDraft.notes} onChange={(event) => setLicenseDraft({ ...licenseDraft, notes: event.target.value })} />
-                </Field>
-                <Button type="submit">
-                  <KeyRound size={18} aria-hidden="true" />
-                  Gerar chave
-                </Button>
-              </form>
+                {licenseFormOpen ? (
+                  <form className="mt-4 grid max-h-[80vh] gap-4 overflow-y-auto border-t border-ink/10 pt-4" onSubmit={submitLicenseDraft}>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <Field label="Proprietário">
+                        <SelectInput value={licenseDraft.owner_id} onChange={(event) => updateLicenseDraft('owner_id', event.target.value)}>
+                          <option value="">Selecione</option>
+                          {owners.map((owner) => (
+                            <option key={owner.id} value={owner.id}>
+                              {owner.email}
+                            </option>
+                          ))}
+                        </SelectInput>
+                      </Field>
+                      <Field label="Imóvel">
+                        <SelectInput value={licenseDraft.property_id} onChange={(event) => updateLicenseDraft('property_id', event.target.value)}>
+                          <option value="">Opcional</option>
+                          {properties.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </SelectInput>
+                      </Field>
+                      <Field label="Plano">
+                        <TextInput value={licenseDraft.plan} onChange={(event) => updateLicenseDraft('plan', event.target.value)} />
+                      </Field>
+                      <Field label="Status">
+                        <SelectInput value={licenseDraft.status} onChange={(event) => updateLicenseDraft('status', event.target.value)}>
+                          <option value="active">Ativa</option>
+                          <option value="expired">Vencida</option>
+                          <option value="suspended">Suspensa</option>
+                          <option value="blocked">Bloqueada</option>
+                          <option value="cancelled">Cancelada</option>
+                          <option value="inactive">Inativa</option>
+                          <option value="trial">Teste</option>
+                        </SelectInput>
+                      </Field>
+                      <Field label="Início">
+                        <TextInput type="date" value={licenseDraft.starts_at} onChange={(event) => updateLicenseDraft('starts_at', event.target.value)} />
+                      </Field>
+                      <Field label="Vencimento">
+                        <TextInput type="date" value={licenseDraft.expires_at} onChange={(event) => updateLicenseDraft('expires_at', event.target.value)} />
+                      </Field>
+                      <Field label="Valor mensal">
+                        <TextInput type="number" value={licenseDraft.monthly_value} onChange={(event) => updateLicenseDraft('monthly_value', event.target.value)} />
+                      </Field>
+                      <Field label="Limite de imóveis">
+                        <TextInput type="number" value={licenseDraft.property_limit} onChange={(event) => updateLicenseDraft('property_limit', event.target.value)} />
+                      </Field>
+                    </div>
+                    <Field label="Observações">
+                      <TextArea value={licenseDraft.notes} onChange={(event) => updateLicenseDraft('notes', event.target.value)} />
+                    </Field>
+                    <div className="sticky bottom-0 -mx-3 flex flex-col gap-2 border-t border-ink/10 bg-white px-3 py-3 sm:static sm:mx-0 sm:flex-row sm:justify-end sm:border-t-0 sm:bg-transparent sm:px-0 sm:py-0">
+                      <Button type="button" variant="outline" onClick={() => setLicenseFormOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button type="submit">
+                        <KeyRound size={18} aria-hidden="true" />
+                        Gerar chave
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
+              </section>
               <div className="grid gap-3">
                 {visibleLicenses.map((license) => {
                   const edit = licenseEdits[license.id] || {};
                   const mergedLicense = { ...license, ...edit };
                   const status = normalizeLicenseStatus(mergedLicense);
                   const owner = profiles.find((profile) => profile.id === license.owner_id);
+                  const linkedProperty = properties.find((item) => item.id === license.property_id);
                   const history = licenseHistory.filter((item) => item.license_id === license.id).slice(0, 3);
+                  const isExpanded = Boolean(expandedLicenseIds[license.id]);
+                  const isEditing = editingLicenseId === license.id;
                   return (
-                    <div key={license.id} className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
-                      <div className="grid gap-3 xl:grid-cols-[1fr_auto] xl:items-start">
-                      <div>
-                        <p className="font-black">{license.license_key}</p>
-                        <p className="text-sm text-ink/65">
-                          {owner?.email || 'Sem proprietário'} - {license.plan || 'Plano'} - {licenseStatusLabels[status] || status}
-                        </p>
-                        <p className="mt-1 text-sm text-ink/65">
-                          Vence em {license.expires_at || '-'} - {currency.format(license.monthly_value || 0)}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" onClick={() => updateLicense(license, { status: 'active', expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd') })}>
-                          Renovar
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => updateLicense(license, { status: 'suspended' })}>
-                          Suspender
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => updateLicense(license, { status: 'active' })}>
-                          Liberar
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => deleteLicense(license.id)}>
-                          Excluir
-                        </Button>
-                      </div>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-5">
-                        <Field label="Plano">
-                          <TextInput
-                            value={mergedLicense.plan || ''}
-                            onChange={(event) =>
-                              setLicenseEdits((current) => ({
-                                ...current,
-                                [license.id]: { ...current[license.id], plan: event.target.value },
-                              }))
-                            }
-                          />
-                        </Field>
-                        <Field label="Status">
-                          <SelectInput
-                            value={mergedLicense.status || 'trial'}
-                            onChange={(event) =>
-                              setLicenseEdits((current) => ({
-                                ...current,
-                                [license.id]: { ...current[license.id], status: event.target.value },
-                              }))
-                            }
-                          >
-                            <option value="active">Ativa</option>
-                            <option value="expired">Vencida</option>
-                            <option value="suspended">Suspensa</option>
-                            <option value="blocked">Bloqueada</option>
-                            <option value="cancelled">Cancelada</option>
-                            <option value="inactive">Inativa</option>
-                            <option value="trial">Teste</option>
-                          </SelectInput>
-                        </Field>
-                        <Field label="Vencimento">
-                          <TextInput
-                            type="date"
-                            value={mergedLicense.expires_at || ''}
-                            onChange={(event) =>
-                              setLicenseEdits((current) => ({
-                                ...current,
-                                [license.id]: { ...current[license.id], expires_at: event.target.value },
-                              }))
-                            }
-                          />
-                        </Field>
-                        <Field label="Valor mensal">
-                          <TextInput
-                            type="number"
-                            value={mergedLicense.monthly_value || 0}
-                            onChange={(event) =>
-                              setLicenseEdits((current) => ({
-                                ...current,
-                                [license.id]: { ...current[license.id], monthly_value: event.target.value },
-                              }))
-                            }
-                          />
-                        </Field>
-                        <Field label="Limite">
-                          <TextInput
-                            type="number"
-                            value={mergedLicense.property_limit || 1}
-                            onChange={(event) =>
-                              setLicenseEdits((current) => ({
-                                ...current,
-                                [license.id]: { ...current[license.id], property_limit: event.target.value },
-                              }))
-                            }
-                          />
-                        </Field>
-                      </div>
-                      <Field label="Observações">
-                        <TextArea
-                          value={mergedLicense.notes || ''}
-                          onChange={(event) =>
-                            setLicenseEdits((current) => ({
-                              ...current,
-                              [license.id]: { ...current[license.id], notes: event.target.value },
-                            }))
-                          }
-                        />
-                      </Field>
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/10 pt-3">
-                        <div className="text-xs font-semibold text-ink/55">
-                          {history.length
-                            ? history.map((item) => `${item.action} em ${format(new Date(item.created_at), 'dd/MM/yyyy HH:mm')}`).join(' | ')
-                            : 'Sem histórico registrado.'}
+                    <article key={license.id} className="rounded-md bg-white p-3 shadow-sm ring-1 ring-ink/5 sm:p-4">
+                      <div className="grid gap-3 xl:grid-cols-[1fr_auto] xl:items-center">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="max-w-full truncate font-mono text-sm font-black text-ink sm:text-base">{license.license_key || 'Sem chave'}</p>
+                            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">
+                              {licenseStatusLabels[status] || status}
+                            </span>
+                          </div>
+                          <div className="mt-2 grid gap-2 text-sm text-ink/65 sm:grid-cols-2 xl:grid-cols-6">
+                            <span className="truncate"><strong>Proprietário:</strong> {owner?.email || 'Sem proprietário'}</span>
+                            <span><strong>Plano:</strong> {license.plan || 'Plano'}</span>
+                            <span><strong>Vencimento:</strong> {license.expires_at || '-'}</span>
+                            <span><strong>Limite:</strong> {license.property_limit || 1}</span>
+                            <span><strong>Valor:</strong> {currency.format(license.monthly_value || 0)}</span>
+                            <span className="truncate"><strong>Imóvel:</strong> {linkedProperty?.name || 'Não vinculado'}</span>
+                          </div>
                         </div>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => {
-                            updateLicense(license, licenseEdits[license.id] || {});
-                            setLicenseEdits((current) => {
-                              const next = { ...current };
-                              delete next[license.id];
-                              return next;
-                            });
-                          }}
-                        >
-                          <Save size={18} aria-hidden="true" />
-                          Salvar alterações
-                        </Button>
+                        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                          <Button type="button" variant="outline" className="px-2.5 sm:px-3" onClick={() => toggleLicenseDetails(license.id)}>
+                            <Eye size={16} aria-hidden="true" />
+                            {isExpanded ? 'Menos' : 'Mais'}
+                          </Button>
+                          <Button type="button" variant="outline" className="px-2.5 sm:px-3" onClick={() => startLicenseEdit(license)}>
+                            <Pencil size={16} aria-hidden="true" />
+                            Editar
+                          </Button>
+                          <Button type="button" variant="outline" className="px-2.5 sm:px-3" onClick={() => deleteLicense(license.id)}>
+                            <Trash2 size={16} aria-hidden="true" />
+                            Excluir
+                          </Button>
+                        </div>
                       </div>
-                    </div>
+
+                      {isEditing ? (
+                        <div className="mt-4 grid gap-3 border-t border-ink/10 pt-4">
+                          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+                            <Field label="Plano">
+                              <TextInput value={mergedLicense.plan || ''} onChange={(event) => updateLicenseEdit(license.id, 'plan', event.target.value)} />
+                            </Field>
+                            <Field label="Status">
+                              <SelectInput value={mergedLicense.status || 'trial'} onChange={(event) => updateLicenseEdit(license.id, 'status', event.target.value)}>
+                                <option value="active">Ativa</option>
+                                <option value="expired">Vencida</option>
+                                <option value="suspended">Suspensa</option>
+                                <option value="blocked">Bloqueada</option>
+                                <option value="cancelled">Cancelada</option>
+                                <option value="inactive">Inativa</option>
+                                <option value="trial">Teste</option>
+                              </SelectInput>
+                            </Field>
+                            <Field label="Vencimento">
+                              <TextInput type="date" value={mergedLicense.expires_at || ''} onChange={(event) => updateLicenseEdit(license.id, 'expires_at', event.target.value)} />
+                            </Field>
+                            <Field label="Valor mensal">
+                              <TextInput type="number" value={mergedLicense.monthly_value || 0} onChange={(event) => updateLicenseEdit(license.id, 'monthly_value', event.target.value)} />
+                            </Field>
+                            <Field label="Limite de imóveis">
+                              <TextInput type="number" value={mergedLicense.property_limit || 1} onChange={(event) => updateLicenseEdit(license.id, 'property_limit', event.target.value)} />
+                            </Field>
+                          </div>
+                          <Field label="Observações">
+                            <TextArea value={mergedLicense.notes || ''} onChange={(event) => updateLicenseEdit(license.id, 'notes', event.target.value)} />
+                          </Field>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                            <Button type="button" variant="outline" onClick={() => cancelLicenseEdit(license.id)}>
+                              <X size={18} aria-hidden="true" />
+                              Cancelar
+                            </Button>
+                            <Button type="button" variant="secondary" onClick={() => saveLicenseEdit(license)}>
+                              <Save size={18} aria-hidden="true" />
+                              Salvar alterações
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {isExpanded && !isEditing ? (
+                        <div className="mt-4 grid gap-4 border-t border-ink/10 pt-4">
+                          <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-md bg-[#f4f8ff] p-3">
+                              <p className="text-xs font-black uppercase tracking-wide text-ink/45">Criada em</p>
+                              <p className="mt-1 font-bold">{formatDateTime(license.created_at)}</p>
+                            </div>
+                            <div className="rounded-md bg-[#f4f8ff] p-3">
+                              <p className="text-xs font-black uppercase tracking-wide text-ink/45">Atualizada em</p>
+                              <p className="mt-1 font-bold">{formatDateTime(license.updated_at)}</p>
+                            </div>
+                            <div className="rounded-md bg-[#f4f8ff] p-3">
+                              <p className="text-xs font-black uppercase tracking-wide text-ink/45">Imóvel vinculado</p>
+                              <p className="mt-1 font-bold">{linkedProperty?.name || 'Não vinculado'}</p>
+                            </div>
+                            <div className="rounded-md bg-[#f4f8ff] p-3">
+                              <p className="text-xs font-black uppercase tracking-wide text-ink/45">Início</p>
+                              <p className="mt-1 font-bold">{license.starts_at || '-'}</p>
+                            </div>
+                          </div>
+                          <div className="rounded-md bg-[#f4f8ff] p-3 text-sm">
+                            <p className="text-xs font-black uppercase tracking-wide text-ink/45">Observações</p>
+                            <p className="mt-1 text-ink/70">{license.notes || 'Sem observações.'}</p>
+                          </div>
+                          <div className="rounded-md bg-[#f4f8ff] p-3 text-sm">
+                            <p className="text-xs font-black uppercase tracking-wide text-ink/45">Histórico</p>
+                            <div className="mt-2 grid gap-1 text-ink/70">
+                              {history.length ? (
+                                history.map((item) => (
+                                  <span key={item.id || item.created_at}>
+                                    {item.action || 'evento'} em {formatDateTime(item.created_at)}
+                                  </span>
+                                ))
+                              ) : (
+                                <span>Sem histórico registrado.</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" className="px-3" onClick={() => updateLicense(license, { status: 'active', expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd') })}>
+                              <RefreshCw size={16} aria-hidden="true" />
+                              Renovar
+                            </Button>
+                            <Button type="button" variant="outline" className="px-3" onClick={() => updateLicense(license, { status: 'suspended' })}>
+                              <Lock size={16} aria-hidden="true" />
+                              Suspender
+                            </Button>
+                            <Button type="button" variant="outline" className="px-3" onClick={() => updateLicense(license, { status: 'blocked' })}>
+                              <Lock size={16} aria-hidden="true" />
+                              Bloquear
+                            </Button>
+                            <Button type="button" variant="outline" className="px-3" onClick={() => updateLicense(license, { status: 'active' })}>
+                              <ShieldCheck size={16} aria-hidden="true" />
+                              Liberar
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </article>
                   );
                 })}
+                {!visibleLicenses.length ? <EmptyState title="Nenhuma licença encontrada" text="Use Gerar licença para cadastrar a primeira chave." /> : null}
               </div>
             </div>
           ) : null}
