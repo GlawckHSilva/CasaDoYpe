@@ -1268,8 +1268,7 @@ function Button({ children, className = '', variant = 'primary', ...props }) {
     secondary: 'btn-secondary-theme',
     ghost:
       'bg-white/90 text-ink shadow-[0_10px_24px_rgba(255,255,255,0.18)] backdrop-blur hover:bg-white',
-    outline:
-      'border border-blue-200 bg-white text-ink shadow-sm hover:border-blue-300 hover:bg-blue-50',
+    outline: 'btn-outline-theme',
   };
 
   return (
@@ -1291,28 +1290,28 @@ function Field({ label, children }) {
   );
 }
 
-function TextInput(props) {
+function TextInput({ className = '', ...props }) {
   return (
     <input
-      className="min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-11 sm:text-sm"
+      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-11 sm:text-sm ${className}`}
       {...props}
     />
   );
 }
 
-function TextArea(props) {
+function TextArea({ className = '', ...props }) {
   return (
     <textarea
-      className="min-h-20 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-24 sm:text-sm"
+      className={`form-control min-h-20 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-24 sm:text-sm ${className}`}
       {...props}
     />
   );
 }
 
-function SelectInput({ children, ...props }) {
+function SelectInput({ children, className = '', ...props }) {
   return (
     <select
-      className="min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition sm:min-h-11 sm:text-sm"
+      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition sm:min-h-11 sm:text-sm ${className}`}
       {...props}
     >
       {children}
@@ -3584,37 +3583,53 @@ function PropertyCard({ property, photo, onNavigate }) {
 
 function HousesSearch({ query, setQuery, city, setCity, guests, setGuests }) {
   return (
-    <div className="grid gap-3 rounded-md bg-white p-3 shadow-soft ring-1 ring-ink/10 md:grid-cols-[1fr_220px_170px]">
-      <label className="flex items-center gap-3 rounded-md bg-mist px-3">
-        <Search size={18} className="text-ink/55" />
-        <input
-          className="min-h-12 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-ink/45"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Nome da casa"
-        />
+    <form className="search-shell" onSubmit={(event) => event.preventDefault()}>
+      <label className="search-field">
+        <span className="search-field-icon">
+          <Search size={18} aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="search-field-label">Nome da casa</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Casa na praia"
+          />
+        </span>
       </label>
-      <label className="flex items-center gap-3 rounded-md bg-mist px-3">
-        <MapPin size={18} className="text-ink/55" />
-        <input
-          className="min-h-12 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-ink/45"
-          value={city}
-          onChange={(event) => setCity(event.target.value)}
-          placeholder="Cidade"
-        />
+      <label className="search-field">
+        <span className="search-field-icon">
+          <MapPin size={18} aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="search-field-label">Cidade</span>
+          <input
+            value={city}
+            onChange={(event) => setCity(event.target.value)}
+            placeholder="Destino"
+          />
+        </span>
       </label>
-      <label className="flex items-center gap-3 rounded-md bg-mist px-3">
-        <Users size={18} className="text-ink/55" />
-        <input
-          className="min-h-12 w-full bg-transparent text-sm font-semibold outline-none"
-          type="number"
-          min="1"
-          value={guests}
-          onChange={(event) => setGuests(event.target.value)}
-          placeholder="Hóspedes"
-        />
+      <label className="search-field">
+        <span className="search-field-icon">
+          <Users size={18} aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="search-field-label">Hóspedes</span>
+          <input
+            type="number"
+            min="1"
+            value={guests}
+            onChange={(event) => setGuests(event.target.value)}
+            placeholder="Quantidade"
+          />
+        </span>
       </label>
-    </div>
+      <button type="submit" className="search-submit inline-flex items-center justify-center gap-2 px-5">
+        <Search size={18} aria-hidden="true" />
+        Buscar
+      </button>
+    </form>
   );
 }
 
@@ -4989,13 +5004,90 @@ function SuperAdminDashboard({
             </div>
           ) : null}
           {view === 'settings' ? (
-            <div className="rounded-md bg-white p-4 shadow-sm">
-              <h2 className="text-xl font-black">Configurações de segurança</h2>
-              <p className="mt-2 text-sm leading-6 text-ink/65">
-                A rota `/super-admin` não aparece em menus públicos. O acesso é validado pelo role `super_admin` no frontend e pelas
-                policies/funções do Supabase.
-              </p>
-            </div>
+            <section className="grid gap-4">
+              <div className="rounded-md bg-white p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-wide text-ink/50">Painel global</p>
+                <h2 className="mt-1 text-xl font-black">Configurações do Super Admin</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/65">
+                  Controle os pontos sensíveis do Hospedex em blocos separados para segurança, ambiente, contato e auditoria.
+                </p>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    icon: 'lock',
+                    title: 'Acesso protegido',
+                    text: 'A rota /super-admin fica fora dos menus públicos e exige role super_admin.',
+                    status: 'Ativo',
+                  },
+                  {
+                    icon: 'vpn_key',
+                    title: 'Supabase',
+                    text: hasSupabaseConfig ? 'Variáveis públicas do Supabase detectadas no build.' : 'Supabase não configurado no build atual.',
+                    status: hasSupabaseConfig ? 'Configurado' : 'Pendente',
+                  },
+                  {
+                    icon: 'mail',
+                    title: 'Contato comercial',
+                    text: commercialEmail,
+                    status: 'E-mail padrão',
+                  },
+                  {
+                    icon: 'description',
+                    title: 'Auditoria',
+                    text: `${adminLogs.length} log(s) recentes disponíveis para conferência.`,
+                    status: 'Monitorado',
+                  },
+                ].map((item) => (
+                  <article key={item.title} className="rounded-md border border-ink/10 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="grid h-11 w-11 place-items-center rounded-md bg-mist text-leaf">
+                        <PanelIcon icon={item.icon} size={22} />
+                      </span>
+                      <span className="rounded-md bg-leaf/10 px-2 py-1 text-[11px] font-black text-leaf">{item.status}</span>
+                    </div>
+                    <h3 className="mt-4 font-black">{item.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-ink/65">{item.text}</p>
+                  </article>
+                ))}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                <article className="rounded-md bg-white p-4 shadow-sm">
+                  <h3 className="font-black">Regras de permissão</h3>
+                  <div className="mt-4 grid gap-3 text-sm">
+                    {[
+                      ['Super Admin', 'Gerencia usuários, licenças, financeiro Hospedex, banners e configurações.'],
+                      ['Proprietário', 'Acessa somente as próprias casas, reservas, caixa e dados financeiros.'],
+                      ['Hóspede', 'Acessa reservas, suporte, perfil e mensagens sem exigir licença.'],
+                    ].map(([label, text]) => (
+                      <div key={label} className="rounded-md border border-ink/10 bg-[#f8fbff] p-3">
+                        <p className="font-black">{label}</p>
+                        <p className="mt-1 leading-6 text-ink/65">{text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="rounded-md bg-white p-4 shadow-sm">
+                  <h3 className="font-black">Checklist operacional</h3>
+                  <div className="mt-4 grid gap-3 text-sm">
+                    {[
+                      'Manter SUPABASE_SERVICE_ROLE_KEY somente nas Edge Functions.',
+                      'Validar alterações de role antes de liberar licenças.',
+                      'Conferir logs após exclusões e mudanças financeiras críticas.',
+                      'Publicar alterações somente após build e teste em produção.',
+                    ].map((item) => (
+                      <div key={item} className="flex items-start gap-3 rounded-md bg-[#f8fbff] p-3">
+                        <ShieldCheck className="mt-0.5 shrink-0 text-leaf" size={18} />
+                        <span className="leading-6 text-ink/70">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              </div>
+            </section>
           ) : null}
         </main>
       </div>
@@ -5414,9 +5506,9 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
       : 'Cadastro e login precisam das variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no build.'
     : '';
   const socialProviders = [
-    ['google', 'Google'],
-    ['facebook', 'Facebook'],
-    ['apple', 'Apple'],
+    ['google', 'Google', 'G'],
+    ['facebook', 'Facebook', 'f'],
+    ['apple', 'Apple', 'A'],
   ];
 
   useEffect(() => {
@@ -5675,18 +5767,18 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
                 <span className="h-px flex-1 bg-ink/10" />
               </div>
               <div className="grid gap-2 sm:grid-cols-3">
-                {socialProviders.map(([provider, label]) => (
-                  <Button
+                {socialProviders.map(([provider, label, mark]) => (
+                  <button
                     key={provider}
                     type="button"
-                    variant="outline"
-                    className="min-h-9 px-3 py-2 sm:min-h-10"
+                    className="social-login-button"
                     onClick={() => signInWithProvider(provider)}
                     aria-label={`Entrar com ${label}`}
                     title={label}
                   >
+                    <span className="social-login-mark">{mark}</span>
                     {label}
-                  </Button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -7528,25 +7620,45 @@ function AdminPanel({
               {copyNotice ? <p className="rounded-md bg-leaf/10 px-3 py-2 text-sm font-bold text-leaf">{copyNotice}</p> : null}
               {adminNotice && adminView === 'houses' ? <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{adminNotice}</p> : null}
               {normalizeRole(authProfile?.role) === 'proprietario' ? (
-                <p className={`rounded-md px-3 py-2 text-sm font-bold ${ownerReachedPropertyLimit ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-                  {ownerPropertyLimitMessage}
-                </p>
+                <div
+                  className={`flex flex-col gap-3 rounded-md border px-3 py-3 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-between ${
+                    ownerReachedPropertyLimit
+                      ? 'border-red-200 bg-red-50 text-red-800'
+                      : 'border-blue-200 bg-blue-50 text-blue-800'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-2 font-black">
+                    {ownerReachedPropertyLimit ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
+                    {ownerPropertyLimitMessage}
+                  </span>
+                  <span className="w-fit rounded-md bg-white/80 px-2.5 py-1 text-xs font-black">
+                    {ownerPropertyLimitState.currentProperties || 0}/{ownerPropertyLimitState.propertyLimit || 0} casas
+                  </span>
+                </div>
               ) : null}
               <div className="grid gap-2">
                 {properties.map((item) => (
-                  <div
+                  <article
                     key={item.id}
-                    className={`grid gap-3 rounded-xl border px-3 py-3 shadow-sm transition duration-200 sm:grid-cols-[1fr_auto] sm:items-center ${
+                    className={`grid gap-3 rounded-md border px-3 py-3 shadow-sm transition duration-200 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
                       item.id === property.id
-                        ? 'border-blue-300 bg-gradient-to-r from-blue-50 to-sky-100'
-                        : 'border-ink/10 bg-white hover:border-blue-200 hover:bg-mist'
+                        ? 'border-blue-300 bg-gradient-to-r from-blue-50 to-sky-100 shadow-[0_14px_30px_rgba(37,99,235,0.12)]'
+                        : 'border-ink/10 bg-white hover:border-blue-200 hover:bg-[#f8fbff]'
                     }`}
                   >
-                    <button type="button" className="text-left" onClick={() => startEditProperty(item.id)}>
-                      <span className="block text-xs font-black">{item.name}</span>
-                      <span className="mt-0.5 block truncate text-[11px] font-semibold text-ink/60">{item.city}</span>
+                    <button type="button" className="flex min-w-0 items-center gap-3 text-left" onClick={() => startEditProperty(item.id)}>
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-white text-leaf shadow-sm">
+                        <Home size={20} aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black">{item.name}</span>
+                        <span className="mt-0.5 block truncate text-xs font-semibold text-ink/60">{item.city || 'Cidade não informada'}</span>
+                        {item.id === property.id ? (
+                          <span className="mt-2 inline-flex rounded-md bg-leaf/10 px-2 py-1 text-[11px] font-black text-leaf">Selecionada</span>
+                        ) : null}
+                      </span>
                     </button>
-                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                    <div className="grid grid-cols-4 gap-2 sm:flex sm:justify-end">
                       <Button
                         type="button"
                         variant={item.id === property.id && !showNewProperty ? 'secondary' : 'outline'}
@@ -7589,7 +7701,7 @@ function AdminPanel({
                         <Trash2 size={16} />
                       </Button>
                     </div>
-                  </div>
+                  </article>
                 ))}
                 {!properties.length ? (
                   <div className="rounded-md border border-dashed border-ink/20 bg-[#f4f8ff] p-5 text-center">
