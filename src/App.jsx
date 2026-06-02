@@ -216,6 +216,23 @@ const paymentStatusLabels = {
   not_required: 'Nao aplicavel',
 };
 
+const platformPaymentMethodLabels = {
+  pix: 'Pix',
+  card: 'Cartao',
+  boleto: 'Boleto',
+  transfer: 'Transferencia',
+  cash: 'Dinheiro',
+  check: 'Cheque',
+  other: 'Outro',
+};
+
+const platformFinanceStatusLabels = {
+  received: 'Recebido',
+  expected: 'A receber',
+  paid: 'Pago',
+  cancelled: 'Cancelado',
+};
+
 const roleLabels = {
   super_admin: 'Super Admin',
   proprietario: 'Proprietário',
@@ -274,6 +291,12 @@ const defaultInterestRates = [
   { installments: 4, rate: 7 },
 ];
 
+const platformPlanPrices = {
+  mensal: 49.9,
+  semestral: 249.9,
+  anual: 449.9,
+};
+
 function createEmptyLicenseDraft() {
   return {
     owner_id: '',
@@ -282,8 +305,26 @@ function createEmptyLicenseDraft() {
     status: 'trial',
     starts_at: format(new Date(), 'yyyy-MM-dd'),
     expires_at: format(addDays(new Date(), 3), 'yyyy-MM-dd'),
-    monthly_value: 0,
+    monthly_value: platformPlanPrices.mensal,
     property_limit: 1,
+    notes: '',
+  };
+}
+
+function createEmptyPlatformMovementDraft(type = 'income') {
+  return {
+    type,
+    status: type === 'expense' ? 'paid' : 'received',
+    source: 'manual',
+    description: type === 'expense' ? 'Despesa administrativa' : 'Receita Hospedex',
+    owner_id: '',
+    owner_name: '',
+    owner_document: '',
+    plan: '',
+    property_limit: 1,
+    amount: '',
+    payment_method: 'pix',
+    due_date: format(new Date(), 'yyyy-MM-dd'),
     notes: '',
   };
 }
@@ -917,6 +958,152 @@ function buildMonthlyFinancialRows(cashMovements = []) {
   return rows.map((row) => ({ ...row, percentage: Math.max(8, Math.round((Math.abs(row.total) / max) * 100)) }));
 }
 
+function getPlatformPlanAmount(plan, explicitAmount = 0) {
+  const amount = Number(explicitAmount || 0);
+  if (amount > 0) return amount;
+  const normalizedPlan = normalizeSearchText(plan || 'mensal');
+  if (normalizedPlan.includes('anual')) return platformPlanPrices.anual;
+  if (normalizedPlan.includes('semestral')) return platformPlanPrices.semestral;
+  return platformPlanPrices.mensal;
+}
+
+function getPlatformMovementAmount(movement) {
+  return Math.max(0, Number(movement?.amount || 0));
+}
+
+function isPlatformExpenseMovement(movement) {
+  return movement?.type === 'expense';
+}
+
+function isPlatformReceived(movement) {
+  return ['received', 'paid'].includes(movement?.status);
+}
+
+function isPlatformReceivable(movement) {
+  return movement?.type === 'income' && movement?.status === 'expected';
+}
+
+function getOwnerDocument(ownerId, propertyId, paymentSettings = []) {
+  return (
+    paymentSettings.find((item) => item.owner_id === ownerId && item.bank_document)?.bank_document ||
+    paymentSettings.find((item) => item.property_id === propertyId && item.bank_document)?.bank_document ||
+    ''
+  );
+}
+
+function buildLicensePlatformMovement(license, profiles = [], properties = [], paymentSettings = [], source = 'license') {
+  const owner = profiles.find((profile) => profile.id === license.owner_id);
+  const property = properties.find((item) => item.id === license.property_id);
+  const status = normalizeLicenseStatus(license);
+  const plan = license.plan || 'mensal';
+  const amount = getPlatformPlanAmount(plan, license.monthly_value);
+
+  return {
+    id: `${source}-${license.id}`,
+    type: 'income',
+    status: status === 'active' ? 'received' : 'expected',
+    source,
+    description: `${source === 'renewal' ? 'Renovacao' : 'Licenca'} ${plan}`,
+    owner_id: license.owner_id || '',
+    owner_name: owner?.full_name || owner?.email || 'Proprietario nao informado',
+    owner_document: getOwnerDocument(license.owner_id, license.property_id, paymentSettings),
+    license_id: license.id,
+    plan,
+    property_limit: Number(license.property_limit || 1),
+    amount,
+    payment_method: 'pix',
+    due_date: String(license.starts_at || license.created_at || license.expires_at || '').slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
+    paid_at: status === 'active' ? license.updated_at || license.created_at || null : null,
+    notes: property?.name ? `Imovel vinculado: ${property.name}` : license.notes || '',
+    created_at: license.created_at || new Date().toISOString(),
+    updated_at: license.updated_at || license.created_at || new Date().toISOString(),
+    generatedFromLicense: true,
+  };
+}
+
+function buildPlatformFinancialMovements(licenses = [], manualMovements = [], profiles = [], properties = [], paymentSettings = []) {
+  const manual = (manualMovements || []).map((movement) => ({
+    ...movement,
+    amount: Number(movement.amount || 0),
+    property_limit: Number(movement.property_limit || 1),
+  }));
+  const storedLicenseIds = new Set(
+    manual
+      .filter((movement) => movement.license_id && movement.source === 'license')
+      .map((movement) => movement.license_id),
+  );
+  const generated = licenses
+    .filter((license) => license.id && !storedLicenseIds.has(license.id))
+    .map((license) => buildLicensePlatformMovement(license, profiles, properties, paymentSettings));
+
+  return [...manual, ...generated].sort((a, b) =>
+    String(b.due_date || b.created_at || '').localeCompare(String(a.due_date || a.created_at || '')),
+  );
+}
+
+function calculatePlatformFinanceSummary(movements = []) {
+  const activeRows = movements.filter((movement) => movement.status !== 'cancelled');
+  const received = activeRows
+    .filter((movement) => movement.type === 'income' && isPlatformReceived(movement))
+    .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  const receivable = activeRows
+    .filter(isPlatformReceivable)
+    .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  const spent = activeRows
+    .filter(isPlatformExpenseMovement)
+    .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  return { received, receivable, spent, total: received + receivable - spent };
+}
+
+function buildPlatformMonthlyRows(movements = []) {
+  const grouped = new Map();
+  movements
+    .filter((movement) => movement.status !== 'cancelled')
+    .forEach((movement) => {
+      const key = String(movement.due_date || movement.paid_at || movement.created_at || '').slice(0, 7) || 'Sem data';
+      const current = grouped.get(key) || { monthKey: key, income: 0, expense: 0, total: 0, licensesSold: 0 };
+      if (isPlatformExpenseMovement(movement)) {
+        current.expense += getPlatformMovementAmount(movement);
+      } else {
+        current.income += getPlatformMovementAmount(movement);
+        if (['license', 'renewal', 'upgrade'].includes(movement.source)) current.licensesSold += 1;
+      }
+      current.total = current.income - current.expense;
+      grouped.set(key, current);
+    });
+
+  const rows = Array.from(grouped.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey)).slice(-12);
+  const max = Math.max(...rows.map((row) => row.income), ...rows.map((row) => row.expense), ...rows.map((row) => Math.abs(row.total)), 1);
+  return rows.map((row) => ({ ...row, percentage: Math.max(8, Math.round((Math.abs(row.total) / max) * 100)) }));
+}
+
+function calculatePlatformReports(movements = [], licenses = []) {
+  const now = new Date();
+  const monthKey = format(now, 'yyyy-MM');
+  const yearKey = format(now, 'yyyy');
+  const activeRows = movements.filter((movement) => movement.status !== 'cancelled');
+  const incomeTotal = (rows) =>
+    rows.filter((movement) => movement.type === 'income').reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  const expenseTotal = (rows) =>
+    rows.filter(isPlatformExpenseMovement).reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  const monthlyRows = activeRows.filter((movement) => String(movement.due_date || movement.created_at || '').startsWith(monthKey));
+  const annualRows = activeRows.filter((movement) => String(movement.due_date || movement.created_at || '').startsWith(yearKey));
+  const received = activeRows
+    .filter((movement) => movement.type === 'income' && isPlatformReceived(movement))
+    .reduce((sum, movement) => sum + getPlatformMovementAmount(movement), 0);
+  const spent = expenseTotal(activeRows);
+  return {
+    monthlyRevenue: incomeTotal(monthlyRows) - expenseTotal(monthlyRows),
+    annualRevenue: incomeTotal(annualRows) - expenseTotal(annualRows),
+    totalReceived: received,
+    totalSpent: spent,
+    netProfit: received - spent,
+    activeLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'active').length,
+    expiredLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'expired').length,
+    blockedLicenses: licenses.filter((license) => ['blocked', 'suspended'].includes(normalizeLicenseStatus(license))).length,
+  };
+}
+
 function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -1093,6 +1280,7 @@ export default function App() {
   const [photos, setPhotos] = useState(() => (useDemoFallback ? readLocalData('photos', demoPhotos) : []));
   const [reservations, setReservations] = useState(() => (useDemoFallback ? readLocalData('reservations', demoReservations) : []));
   const [cashMovements, setCashMovements] = useState(() => (useDemoFallback ? readLocalData('cashMovements', []) : []));
+  const [platformMovements, setPlatformMovements] = useState(() => (useDemoFallback ? readLocalData('platformMovements', []) : []));
   const [suggestions, setSuggestions] = useState(() => (useDemoFallback ? readLocalData('suggestions', []) : []));
   const [supportTickets, setSupportTickets] = useState(() => (useDemoFallback ? readLocalData('supportTickets', []) : []));
   const [homeBanners, setHomeBanners] = useState(() => (useDemoFallback ? readLocalData('homeBanners', []) : []));
@@ -1273,6 +1461,7 @@ export default function App() {
         { data: photoRows },
         { data: reservationRows },
         { data: movementRows },
+        { data: platformMovementRows },
         { data: interestRows },
         profileResult,
         { data: licenseRows },
@@ -1287,6 +1476,7 @@ export default function App() {
           safeSupabaseQuery(supabase.from('property_photos').select('*').order('sort_order')),
           safeSupabaseQuery(supabase.from('reservations').select('*').order('check_in')),
           safeSupabaseQuery(supabase.from('cash_movements').select('*').order('due_date', { ascending: false })),
+          safeSupabaseQuery(supabase.from('platform_financial_movements').select('*').order('due_date', { ascending: false })),
           safeSupabaseQuery(supabase.from('interest_settings').select('*').eq('active', true).order('installments')),
           safeSupabaseQuery(supabase.from('profiles').select('*').order('created_at')),
           safeSupabaseQuery(supabase.from('licenses').select('*').order('expires_at', { ascending: true })),
@@ -1310,6 +1500,7 @@ export default function App() {
       if (Array.isArray(photoRows)) setPhotos(photoRows);
       if (Array.isArray(reservationRows)) setReservations(reservationRows);
       if (Array.isArray(movementRows)) setCashMovements(movementRows);
+      if (Array.isArray(platformMovementRows)) setPlatformMovements(platformMovementRows);
       if (interestRows?.length) {
         setInterestRates(interestRows.map((item) => ({ installments: item.installments, rate: Number(item.rate || 0) })));
       }
@@ -1544,6 +1735,11 @@ export default function App() {
     if (!useDemoFallback) return;
     writeLocalData('cashMovements', cashMovements);
   }, [cashMovements]);
+
+  useEffect(() => {
+    if (!useDemoFallback) return;
+    writeLocalData('platformMovements', platformMovements);
+  }, [platformMovements]);
 
   useEffect(() => {
     if (!useDemoFallback) return;
@@ -2401,9 +2597,12 @@ export default function App() {
             properties={properties}
             reservations={reservations}
             cashMovements={cashMovements}
+            platformMovements={platformMovements}
+            setPlatformMovements={setPlatformMovements}
             licenses={licenses}
             setLicenses={setLicenses}
             licenseHistory={licenseHistory}
+            paymentSettings={paymentSettings}
             suggestions={suggestions}
             setLicenseHistory={setLicenseHistory}
             setProfiles={setProfiles}
@@ -3765,9 +3964,12 @@ function SuperAdminDashboard({
   properties,
   reservations,
   cashMovements,
+  platformMovements = [],
+  setPlatformMovements,
   licenses,
   setLicenses,
   licenseHistory,
+  paymentSettings = [],
   suggestions,
   setLicenseHistory,
   setProfiles,
@@ -3790,6 +3992,8 @@ function SuperAdminDashboard({
   const [licenseFormOpen, setLicenseFormOpen] = useState(false);
   const [expandedLicenseIds, setExpandedLicenseIds] = useState({});
   const [editingLicenseId, setEditingLicenseId] = useState('');
+  const [platformFinanceFormOpen, setPlatformFinanceFormOpen] = useState(false);
+  const [platformFinanceDraft, setPlatformFinanceDraft] = useState(() => createEmptyPlatformMovementDraft('income'));
   const [userNotice, setUserNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [licenseDraft, setLicenseDraft] = useState(createEmptyLicenseDraft);
@@ -3827,6 +4031,17 @@ function SuperAdminDashboard({
     const text = `${license.license_key || ''} ${license.plan || ''} ${owner?.email || ''} ${property?.name || ''}`.toLowerCase();
     return text.includes(query.toLowerCase());
   });
+  const platformFinanceRows = useMemo(
+    () => buildPlatformFinancialMovements(licenses, platformMovements, profiles, properties, paymentSettings),
+    [licenses, platformMovements, profiles, properties, paymentSettings],
+  );
+  const visiblePlatformFinanceRows = platformFinanceRows.filter((movement) => {
+    const text = `${movement.description || ''} ${movement.owner_name || ''} ${movement.owner_document || ''} ${movement.plan || ''} ${movement.payment_method || ''}`.toLowerCase();
+    return text.includes(query.toLowerCase());
+  });
+  const platformFinanceSummary = useMemo(() => calculatePlatformFinanceSummary(platformFinanceRows), [platformFinanceRows]);
+  const platformMonthlyRows = useMemo(() => buildPlatformMonthlyRows(platformFinanceRows), [platformFinanceRows]);
+  const platformReports = useMemo(() => calculatePlatformReports(platformFinanceRows, licenses), [platformFinanceRows, licenses]);
   const stats = {
     owners: owners.length,
     guests: guests.length,
@@ -3838,11 +4053,9 @@ function SuperAdminDashboard({
     activeLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'active').length,
     expiredLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'expired').length,
     activeClients: licenses.filter((license) => ['active', 'trial'].includes(normalizeLicenseStatus(license))).length,
-    monthlyRevenue: cashMovements
-      .filter((movement) => String(movement.due_date || '').slice(0, 7) === format(new Date(), 'yyyy-MM'))
-      .reduce((sum, movement) => sum + (isExpenseMovement(movement) ? -getMovementAmount(movement) : getMovementAmount(movement)), 0),
+    monthlyRevenue: platformReports.monthlyRevenue,
   };
-  const monthlyChart = buildMonthlyRows(cashMovements, reservations);
+  const monthlyChart = platformMonthlyRows.map((row) => ({ monthKey: row.monthKey, revenue: row.total, reservations: row.licensesSold }));
   const growthChart = buildGrowthRows(profiles);
   const menu = [
     ['dashboard', 'Dashboard', 'dashboard'],
@@ -4073,7 +4286,13 @@ function SuperAdminDashboard({
   }
 
   function updateLicenseDraft(field, value) {
-    setLicenseDraft((current) => ({ ...current, [field]: value }));
+    setLicenseDraft((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'plan') {
+        next.monthly_value = getPlatformPlanAmount(value);
+      }
+      return next;
+    });
   }
 
   function toggleLicenseDetails(licenseId) {
@@ -4113,7 +4332,7 @@ function SuperAdminDashboard({
 
   async function submitLicenseDraft(event) {
     event.preventDefault();
-    const saved = await upsertLicense(licenseDraft);
+    const saved = await upsertLicense(licenseDraft, { financeSource: 'license' });
     if (!saved) return;
     setLicenseDraft(createEmptyLicenseDraft());
     setLicenseFormOpen(false);
@@ -4127,7 +4346,96 @@ function SuperAdminDashboard({
     setUserNotice('Licença atualizada.');
   }
 
-  async function upsertLicense(payload) {
+  function openPlatformFinanceForm(type) {
+    setPlatformFinanceDraft(createEmptyPlatformMovementDraft(type));
+    setPlatformFinanceFormOpen(true);
+  }
+
+  function updatePlatformFinanceDraft(field, value) {
+    setPlatformFinanceDraft((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'type') {
+        next.status = value === 'expense' ? 'paid' : 'received';
+        next.description = value === 'expense' ? 'Despesa administrativa' : 'Receita Hospedex';
+      }
+      if (field === 'owner_id') {
+        const owner = profiles.find((profile) => profile.id === value);
+        next.owner_name = owner?.full_name || owner?.email || '';
+        next.owner_document = getOwnerDocument(value, '', paymentSettings);
+      }
+      if (field === 'plan' && !Number(next.amount || 0)) {
+        next.amount = getPlatformPlanAmount(value);
+      }
+      return next;
+    });
+  }
+
+  function buildPlatformMovementPayload(draft) {
+    const owner = profiles.find((profile) => profile.id === draft.owner_id);
+    return {
+      type: draft.type || 'income',
+      status: draft.status || (draft.type === 'expense' ? 'paid' : 'received'),
+      source: draft.source || 'manual',
+      description: String(draft.description || '').trim() || (draft.type === 'expense' ? 'Despesa Hospedex' : 'Receita Hospedex'),
+      owner_id: draft.owner_id || null,
+      owner_name: draft.owner_name || owner?.full_name || owner?.email || '',
+      owner_document: draft.owner_document || getOwnerDocument(draft.owner_id, '', paymentSettings),
+      license_id: draft.license_id || null,
+      plan: draft.plan || '',
+      property_limit: Number(draft.property_limit || 1),
+      amount: Number(draft.amount || 0),
+      payment_method: draft.payment_method || 'pix',
+      due_date: draft.due_date || format(new Date(), 'yyyy-MM-dd'),
+      paid_at: ['received', 'paid'].includes(draft.status) ? new Date().toISOString() : null,
+      notes: draft.notes || '',
+    };
+  }
+
+  async function createPlatformMovement(draft, options = {}) {
+    const payload = buildPlatformMovementPayload(draft);
+    if (!payload.amount || payload.amount <= 0) {
+      setUserNotice('Informe um valor para o lançamento financeiro.');
+      return null;
+    }
+    let saved = { ...payload, id: crypto.randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    if (hasSupabaseConfig) {
+      const { data, error } = await safeSupabaseQuery(
+        supabase.from('platform_financial_movements').insert(payload).select().maybeSingle(),
+        authRequestTimeoutMs,
+        'Salvamento do financeiro Hospedex excedeu o tempo limite.',
+      );
+      if (error) {
+        if (!options.silent) {
+          setUserNotice('Tabela financeira do Hospedex ainda não configurada no Supabase. O lançamento foi exibido apenas nesta sessão.');
+        }
+      } else if (data) {
+        saved = data;
+      }
+    }
+    setPlatformMovements?.((current) => [saved, ...(current || [])]);
+    return saved;
+  }
+
+  async function submitPlatformMovement(event) {
+    event.preventDefault();
+    const saved = await createPlatformMovement(platformFinanceDraft);
+    if (!saved) return;
+    setPlatformFinanceDraft(createEmptyPlatformMovementDraft(platformFinanceDraft.type));
+    setPlatformFinanceFormOpen(false);
+    setUserNotice('Lançamento financeiro registrado.');
+  }
+
+  async function createLicensePlatformMovement(license, source = 'license') {
+    if (!license?.id) return null;
+    if (source === 'license' && platformMovements?.some((movement) => movement.license_id === license.id && movement.source === 'license')) {
+      return null;
+    }
+    const movement = buildLicensePlatformMovement(license, profiles, properties, paymentSettings, source);
+    const { id: _id, generatedFromLicense: _generatedFromLicense, created_at: _createdAt, updated_at: _updatedAt, ...payload } = movement;
+    return createPlatformMovement(payload, { silent: true });
+  }
+
+  async function upsertLicense(payload, options = {}) {
     const normalized = {
       ...payload,
       license_key: payload.license_key || generateLicenseKey(),
@@ -4160,14 +4468,17 @@ function SuperAdminDashboard({
       await supabase.from('license_history').insert(historyEntry);
     }
     await addAdminLog('super_admin_license_saved', { license_id: saved.id, status: saved.status });
+    if (options.financeSource) {
+      await createLicensePlatformMovement(saved, options.financeSource);
+    }
     return saved;
   }
 
-  async function updateLicense(license, updates) {
+  async function updateLicense(license, updates, options = {}) {
     if (['suspended', 'blocked'].includes(updates.status) && updates.status !== license.status && !window.confirm('Tem certeza?')) {
       return null;
     }
-    return upsertLicense({ ...license, ...updates });
+    return upsertLicense({ ...license, ...updates }, options);
   }
 
   async function deleteLicense(licenseId) {
@@ -4276,7 +4587,20 @@ function SuperAdminDashboard({
             <SuperTable title="Reservas" rows={reservations} columns={['guest_name', 'guest_email', 'check_in', 'check_out', 'status']} />
           ) : null}
           {view === 'financial' ? (
-            <SuperTable title="Financeiro" rows={cashMovements} columns={['due_date', 'description', 'status', 'payment_method', 'amount']} />
+            <PlatformFinancialDashboard
+              summary={platformFinanceSummary}
+              reports={platformReports}
+              monthlyRows={platformMonthlyRows}
+              rows={visiblePlatformFinanceRows}
+              owners={owners}
+              draft={platformFinanceDraft}
+              formOpen={platformFinanceFormOpen}
+              notice={userNotice}
+              onOpenForm={openPlatformFinanceForm}
+              onCloseForm={() => setPlatformFinanceFormOpen(false)}
+              onDraftChange={updatePlatformFinanceDraft}
+              onSubmit={submitPlatformMovement}
+            />
           ) : null}
           {view === 'suggestions' ? (
             <SuperTable title="Sugestões" rows={suggestions || []} columns={['created_at', 'name', 'email', 'message', 'status']} />
@@ -4563,7 +4887,18 @@ function SuperAdminDashboard({
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            <Button type="button" variant="outline" className="px-3" onClick={() => updateLicense(license, { status: 'active', expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd') })}>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="px-3"
+                              onClick={() =>
+                                updateLicense(
+                                  license,
+                                  { status: 'active', expires_at: format(addDays(new Date(), 30), 'yyyy-MM-dd') },
+                                  { financeSource: 'renewal' },
+                                )
+                              }
+                            >
                               <RefreshCw size={16} aria-hidden="true" />
                               Renovar
                             </Button>
@@ -4668,6 +5003,249 @@ function SuperChart({ title, rows, valueKey, labelKey }) {
           <p className="text-sm text-ink/60">Sem dados suficientes.</p>
         )}
       </div>
+    </div>
+  );
+}
+
+function PlatformFinancialDashboard({
+  summary,
+  reports,
+  monthlyRows,
+  rows,
+  owners,
+  draft,
+  formOpen,
+  notice,
+  onOpenForm,
+  onCloseForm,
+  onDraftChange,
+  onSubmit,
+}) {
+  const reportCards = [
+    ['Faturamento mensal', currency.format(reports.monthlyRevenue), BarChart3],
+    ['Faturamento anual', currency.format(reports.annualRevenue), ChartColumnIncreasing],
+    ['Total recebido', currency.format(reports.totalReceived), Wallet],
+    ['Total gasto', currency.format(reports.totalSpent), CreditCard],
+    ['Lucro líquido', currency.format(reports.netProfit), BadgeDollarSign],
+    ['Licenças ativas', reports.activeLicenses, ShieldCheck],
+    ['Licenças vencidas', reports.expiredLicenses, AlertTriangle],
+    ['Licenças bloqueadas', reports.blockedLicenses, Lock],
+  ];
+  const maxMonthly = Math.max(
+    ...monthlyRows.map((row) => row.income),
+    ...monthlyRows.map((row) => row.expense),
+    ...monthlyRows.map((row) => Math.abs(row.total)),
+    1,
+  );
+
+  return (
+    <div className="grid gap-4">
+      <section className="rounded-md bg-white p-3 shadow-sm sm:p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Financeiro Hospedex</h2>
+            <p className="mt-1 text-sm text-ink/60">Caixa da plataforma: licenças, renovações, receitas extras e despesas administrativas.</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" onClick={() => onOpenForm('income')}>
+              <Plus size={18} aria-hidden="true" />
+              Receita
+            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenForm('expense')}>
+              <Plus size={18} aria-hidden="true" />
+              Despesa
+            </Button>
+          </div>
+        </div>
+        {notice ? <p className="mt-3 text-sm font-bold text-leaf">{notice}</p> : null}
+
+        {formOpen ? (
+          <form className="mt-4 grid max-h-[88vh] gap-4 overflow-y-auto border-t border-ink/10 pt-4" onSubmit={onSubmit}>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Field label="Tipo">
+                <SelectInput value={draft.type} onChange={(event) => onDraftChange('type', event.target.value)}>
+                  <option value="income">Receita</option>
+                  <option value="expense">Despesa</option>
+                </SelectInput>
+              </Field>
+              <Field label="Descrição">
+                <TextInput value={draft.description} onChange={(event) => onDraftChange('description', event.target.value)} required />
+              </Field>
+              <Field label="Valor">
+                <TextInput type="number" step="0.01" value={draft.amount} onChange={(event) => onDraftChange('amount', event.target.value)} required />
+              </Field>
+              <Field label="Data">
+                <TextInput type="date" value={draft.due_date} onChange={(event) => onDraftChange('due_date', event.target.value)} />
+              </Field>
+              <Field label="Status">
+                <SelectInput value={draft.status} onChange={(event) => onDraftChange('status', event.target.value)}>
+                  {draft.type === 'expense' ? (
+                    <>
+                      <option value="paid">Pago</option>
+                      <option value="expected">A pagar</option>
+                      <option value="cancelled">Cancelado</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="received">Recebido</option>
+                      <option value="expected">A receber</option>
+                      <option value="cancelled">Cancelado</option>
+                    </>
+                  )}
+                </SelectInput>
+              </Field>
+              <Field label="Forma de pagamento">
+                <SelectInput value={draft.payment_method} onChange={(event) => onDraftChange('payment_method', event.target.value)}>
+                  {Object.entries(platformPaymentMethodLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+              <Field label="Proprietário">
+                <SelectInput value={draft.owner_id} onChange={(event) => onDraftChange('owner_id', event.target.value)}>
+                  <option value="">Hospedex / não vinculado</option>
+                  {owners.map((owner) => (
+                    <option key={owner.id} value={owner.id}>
+                      {owner.full_name || owner.email}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+              <Field label="CPF/CNPJ">
+                <TextInput value={draft.owner_document} onChange={(event) => onDraftChange('owner_document', event.target.value)} />
+              </Field>
+              <Field label="Plano">
+                <TextInput value={draft.plan} onChange={(event) => onDraftChange('plan', event.target.value)} placeholder="mensal, semestral, anual" />
+              </Field>
+              <Field label="Casas liberadas">
+                <TextInput type="number" value={draft.property_limit} onChange={(event) => onDraftChange('property_limit', event.target.value)} />
+              </Field>
+            </div>
+            <Field label="Observações">
+              <TextArea value={draft.notes} onChange={(event) => onDraftChange('notes', event.target.value)} />
+            </Field>
+            <div className="sticky bottom-0 -mx-3 flex flex-col gap-2 border-t border-ink/10 bg-white px-3 py-3 sm:static sm:mx-0 sm:flex-row sm:justify-end sm:border-t-0 sm:bg-transparent sm:px-0 sm:py-0">
+              <Button type="button" variant="outline" onClick={onCloseForm}>
+                Cancelar
+              </Button>
+              <Button type="submit">
+                <Save size={18} aria-hidden="true" />
+                Salvar lançamento
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <FinanceCard icon={Wallet} label="Recebido" value={currency.format(summary.received)} />
+        <FinanceCard icon={CalendarDays} label="A receber" value={currency.format(summary.receivable)} />
+        <FinanceCard icon={CreditCard} label="Gasto" value={currency.format(summary.spent)} />
+        <FinanceCard icon={BarChart3} label="Total" value={currency.format(summary.total)} />
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {reportCards.map(([label, value, Icon]) => (
+          <div key={label} className="rounded-md bg-white p-4 shadow-sm">
+            <Icon className="text-leaf" size={22} aria-hidden="true" />
+            <p className="mt-3 text-xs font-black uppercase tracking-wide text-ink/45">{label}</p>
+            <p className="mt-1 text-lg font-black">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-md bg-white p-4 shadow-sm">
+          <h3 className="font-black">Receitas, despesas e lucro por mês</h3>
+          <div className="mt-4 grid gap-3">
+            {monthlyRows.length ? (
+              monthlyRows.map((row) => (
+                <div key={row.monthKey} className="grid gap-2 rounded-md border border-ink/10 p-3 sm:grid-cols-[80px_1fr_auto] sm:items-center">
+                  <span className="text-xs font-bold text-ink/55">{row.monthKey}</span>
+                  <div>
+                    <div className="grid gap-1">
+                      <div className="h-2 overflow-hidden rounded-full bg-mist">
+                        <div className="h-full rounded-full bg-leaf" style={{ width: `${Math.max(6, (row.income / maxMonthly) * 100)}%` }} />
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-mist">
+                        <div className="h-full rounded-full bg-red-500" style={{ width: `${Math.max(6, (row.expense / maxMonthly) * 100)}%` }} />
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-mist">
+                        <div
+                          className={`h-full rounded-full ${row.total < 0 ? 'bg-red-700' : 'bg-blue-600'}`}
+                          style={{ width: `${Math.max(6, (Math.abs(row.total) / maxMonthly) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold text-ink/60">
+                      <span>Receitas: {currency.format(row.income)}</span>
+                      <span>Despesas: {currency.format(row.expense)}</span>
+                      <span>Lucro: {currency.format(row.total)}</span>
+                    </div>
+                  </div>
+                  <span className="text-sm font-black sm:text-right">{row.licensesSold} licenças</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-ink/60">Sem lançamentos financeiros do Hospedex.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-md bg-white p-4 shadow-sm">
+          <h3 className="font-black">Licenças vendidas</h3>
+          <div className="mt-4 grid gap-3">
+            {monthlyRows.length ? (
+              monthlyRows.map((row) => (
+                <div key={`licenses-${row.monthKey}`} className="flex items-center justify-between rounded-md bg-[#f4f8ff] px-3 py-2 text-sm">
+                  <span className="font-bold text-ink/60">{row.monthKey}</span>
+                  <span className="font-black">{row.licensesSold}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-ink/60">Nenhuma venda registrada.</p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3 rounded-md bg-white p-3 shadow-sm sm:p-4">
+        <h3 className="text-lg font-black">Lançamentos do Hospedex</h3>
+        {rows.length ? (
+          rows.map((movement) => {
+            const expense = isPlatformExpenseMovement(movement);
+            return (
+              <article key={movement.id} className="grid gap-3 rounded-md border border-ink/10 p-3 text-sm xl:grid-cols-[1.1fr_0.9fr_auto] xl:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-md px-2 py-1 text-[11px] font-black ${expense ? 'bg-red-50 text-red-700' : 'bg-leaf/10 text-leaf'}`}>
+                      {expense ? 'Despesa' : 'Receita'}
+                    </span>
+                    <p className="font-black">{movement.description || 'Lançamento sem descrição'}</p>
+                  </div>
+                  <p className="mt-1 truncate text-ink/60">
+                    {movement.owner_name || (expense ? 'Hospedex' : 'Proprietário não informado')} · CPF/CNPJ: {movement.owner_document || '-'}
+                  </p>
+                </div>
+                <div className="grid gap-1 text-ink/65 sm:grid-cols-2">
+                  <span>Plano: {movement.plan || '-'}</span>
+                  <span>Casas: {movement.property_limit || '-'}</span>
+                  <span>Data: {movement.due_date || String(movement.created_at || '').slice(0, 10) || '-'}</span>
+                  <span>Forma: {platformPaymentMethodLabels[movement.payment_method] || movement.payment_method || '-'}</span>
+                  <span>Status: {platformFinanceStatusLabels[movement.status] || movement.status || '-'}</span>
+                </div>
+                <p className={`text-lg font-black xl:text-right ${expense ? 'text-red-700' : 'text-leaf'}`}>
+                  {expense ? '-' : '+'}
+                  {currency.format(getPlatformMovementAmount(movement))}
+                </p>
+              </article>
+            );
+          })
+        ) : (
+          <EmptyState title="Nenhum lançamento do Hospedex" text="As receitas de licenças e lançamentos manuais aparecerão aqui." />
+        )}
+      </section>
     </div>
   );
 }

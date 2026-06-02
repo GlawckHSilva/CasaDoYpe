@@ -231,6 +231,7 @@ Deno.serve(async (req) => {
       ['support_tickets', adminClient.from('support_tickets').delete().eq('user_id', userId), true],
       ['licenses', adminClient.from('licenses').delete().eq('owner_id', userId), true],
       ['payment_settings', adminClient.from('payment_settings').delete().eq('owner_id', userId), true],
+      ['platform_financial_movements', adminClient.from('platform_financial_movements').delete().eq('owner_id', userId), true],
       ['reservations', adminClient.from('reservations').delete().eq('guest_user_id', userId), true],
     ] as const;
 
