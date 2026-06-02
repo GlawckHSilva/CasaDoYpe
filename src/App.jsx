@@ -113,6 +113,27 @@ const uiStateKeys = {
   clientPortalView: 'ui:clientPortalView',
   superAdminView: 'ui:superAdminView',
 };
+const superAdminAllowedViews = new Set([
+  'dashboard',
+  'owners',
+  'guests',
+  'licenses',
+  'reservations',
+  'financial',
+  'suggestions',
+  'support',
+  'banners',
+  'settings',
+]);
+const superAdminLegacyViews = {
+  users: 'owners',
+};
+
+function normalizeSuperAdminView(view = 'dashboard') {
+  const normalized = String(view || 'dashboard');
+  const migrated = superAdminLegacyViews[normalized] || normalized;
+  return superAdminAllowedViews.has(migrated) ? migrated : 'dashboard';
+}
 const localAdminPassword = import.meta.env.VITE_LOCAL_ADMIN_PASSWORD || '';
 const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || localAdminPassword;
 const canUsePasswordAdmin = Boolean(adminPassword);
@@ -1074,7 +1095,9 @@ export default function App() {
   const [authInitialMode, setAuthInitialMode] = useState('login');
   const [adminInitialView, setAdminInitialView] = useState(() => readLocalData(uiStateKeys.adminView, 'dashboard'));
   const [clientPortalInitialView, setClientPortalInitialView] = useState(() => readLocalData(uiStateKeys.clientPortalView, 'dashboard'));
-  const [superAdminInitialView, setSuperAdminInitialView] = useState(() => readLocalData(uiStateKeys.superAdminView, 'dashboard'));
+  const [superAdminInitialView, setSuperAdminInitialView] = useState(() =>
+    normalizeSuperAdminView(readLocalData(uiStateKeys.superAdminView, 'dashboard')),
+  );
   const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(() => isPasswordRecoveryUrl());
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(getInitialThemeMode);
@@ -1418,8 +1441,9 @@ export default function App() {
   }
 
   function openSuperAdminSection(view = 'dashboard') {
-    setSuperAdminInitialView(view);
-    writeLocalData(uiStateKeys.superAdminView, view);
+    const nextView = normalizeSuperAdminView(view);
+    setSuperAdminInitialView(nextView);
+    writeLocalData(uiStateKeys.superAdminView, nextView);
     navigateTo('/super-admin');
   }
 
@@ -3108,7 +3132,8 @@ function PublicTopBar({
     role === 'super_admin'
       ? [
           ['Painel super admin', () => onOpenSuperAdmin?.('dashboard'), ShieldCheck],
-          ['Usuários', () => onOpenSuperAdmin?.('users'), Users],
+          ['Proprietários', () => onOpenSuperAdmin?.('owners'), CircleUserRound],
+          ['Hóspedes', () => onOpenSuperAdmin?.('guests'), Users],
           ['Licenças', () => onOpenSuperAdmin?.('licenses'), KeyRound],
           ['Sugestões', () => onOpenSuperAdmin?.('suggestions'), Lightbulb],
           ['Logs', () => onOpenSuperAdmin?.('settings'), Logs],
@@ -3363,7 +3388,7 @@ function MarketingHome({
   const mockups = [
     ['Tela hóspede', User, 'Busca, calendário e solicitação de reserva'],
     ['Tela proprietário', Home, 'Casas, fotos, reservas e caixa'],
-    ['Tela admin', ShieldCheck, 'Usuários, licenças e gestão global'],
+    ['Tela admin', ShieldCheck, 'Proprietários, hóspedes e licenças'],
     ['Reservas', CalendarDays, 'Status, pagamentos e hóspedes'],
     ['Calendário', ClipboardList, 'Bloqueios e disponibilidade'],
     ['Financeiro', Wallet, 'Receitas, despesas e previsões'],
@@ -3736,7 +3761,9 @@ function SuperAdminDashboard({
   onRefresh,
   addAdminLog,
 }) {
-  const [view, setView] = useState(() => readLocalData(uiStateKeys.superAdminView, initialView || 'dashboard'));
+  const [view, setView] = useState(() =>
+    normalizeSuperAdminView(readLocalData(uiStateKeys.superAdminView, initialView || 'dashboard')),
+  );
   const [query, setQuery] = useState('');
   const [licenseEdits, setLicenseEdits] = useState({});
   const [userNotice, setUserNotice] = useState('');
@@ -3764,13 +3791,18 @@ function SuperAdminDashboard({
 
   useEffect(() => {
     const storedView = readLocalData(uiStateKeys.superAdminView, '');
-    const nextView = storedView || initialView || 'dashboard';
+    const requestedView = storedView || initialView || 'dashboard';
+    const nextView = normalizeSuperAdminView(requestedView);
+    if (requestedView !== nextView) {
+      writeLocalData(uiStateKeys.superAdminView, nextView);
+    }
     setView((current) => (current === nextView ? current : nextView));
   }, [initialView]);
 
   function changeView(nextView) {
-    setView(nextView);
-    writeLocalData(uiStateKeys.superAdminView, nextView);
+    const normalizedView = normalizeSuperAdminView(nextView);
+    setView(normalizedView);
+    writeLocalData(uiStateKeys.superAdminView, normalizedView);
   }
 
   const owners = profiles.filter((profile) => normalizeRole(profile.role) === 'proprietario');
@@ -3800,7 +3832,6 @@ function SuperAdminDashboard({
   const growthChart = buildGrowthRows(profiles);
   const menu = [
     ['dashboard', 'Dashboard', 'dashboard'],
-    ['users', 'Usuários', 'admin_panel_settings'],
     ['owners', 'Proprietários', 'manage_accounts'],
     ['guests', 'Hóspedes', 'group'],
     ['licenses', 'Licenças', 'vpn_key'],
@@ -4162,9 +4193,6 @@ function SuperAdminDashboard({
             </div>
           ) : null}
 
-          {view === 'users' ? (
-            <SuperUsersTable title="Usuários" rows={profiles} notice={userNotice} onRoleChange={updateUserRole} onDeleteUser={deleteUser} />
-          ) : null}
           {view === 'owners' ? (
             <SuperUsersTable title="Proprietários" rows={owners} notice={userNotice} onRoleChange={updateUserRole} onDeleteUser={deleteUser} />
           ) : null}
