@@ -2032,6 +2032,9 @@ export default function App() {
   }
 
   async function updateReservationStatus(id, status) {
+    const previousReservation = reservations.find((reservation) => reservation.id === id) || null;
+    let optimisticReservation = previousReservation ? { ...previousReservation, status } : null;
+
     setReservations((current) =>
       current.map((reservation) =>
         reservation.id === id
@@ -2046,11 +2049,27 @@ export default function App() {
     if (hasSupabaseConfig) {
       const updatePayload = { status };
 
-      await supabase
+      const { data, error } = await supabase
         .from('reservations')
         .update(updatePayload)
-        .eq('id', id);
+        .eq('id', id)
+        .select('*')
+        .maybeSingle();
+
+      if (error || !data) {
+        setReservations((current) =>
+          previousReservation
+            ? current.map((reservation) => (reservation.id === id ? previousReservation : reservation))
+            : current,
+        );
+        throw error || new Error('Nenhuma reserva foi atualizada.');
+      }
+
+      optimisticReservation = data;
+      setReservations((current) => current.map((reservation) => (reservation.id === id ? data : reservation)));
     }
+
+    return optimisticReservation;
   }
 
   async function registerPayment(reservation, paymentStatus = 'paid') {
@@ -5560,12 +5579,16 @@ function AdminPanel({
   const [reportType, setReportType] = useState('summary');
   const [adminView, setAdminView] = useState(() => readLocalData(uiStateKeys.adminView, initialView || 'dashboard'));
   const [adminNotice, setAdminNotice] = useState('');
+  const [reservationToast, setReservationToast] = useState(null);
+  const [confirmingReservationId, setConfirmingReservationId] = useState('');
+  const [confirmedReservationId, setConfirmedReservationId] = useState('');
   const [licenseNotice, setLicenseNotice] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
   const [adminUserNotice, setAdminUserNotice] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [adminUsers, setAdminUsers] = useState([]);
   const [cancelTarget, setCancelTarget] = useState(null);
+  const reservationToastTimerRef = useRef(null);
   const [adminDetails, setAdminDetails] = useState(() =>
     readLocalData('adminDetails', {
       full_name: authProfile?.full_name || 'Administrador',
@@ -5694,6 +5717,19 @@ function AdminPanel({
     setAdminView(nextView);
     writeLocalData(uiStateKeys.adminView, nextView);
   }
+
+  function showReservationToast(message, type = 'success') {
+    setReservationToast({ message, type });
+    if (reservationToastTimerRef.current) window.clearTimeout(reservationToastTimerRef.current);
+    reservationToastTimerRef.current = window.setTimeout(() => {
+      setReservationToast(null);
+      reservationToastTimerRef.current = null;
+    }, 3200);
+  }
+
+  useEffect(() => () => {
+    if (reservationToastTimerRef.current) window.clearTimeout(reservationToastTimerRef.current);
+  }, []);
 
   useEffect(() => {
     setShowNewProperty(readLocalData(ownerPropertyDraftOpenKey, false));
@@ -5941,19 +5977,44 @@ function AdminPanel({
   }
 
   async function confirmReservation(reservation) {
-    let preparedReservation = { ...reservation, status: 'confirmed' };
-    if (['pix', 'card'].includes(reservation.payment_method) && !reservation.payment_url) {
-      preparedReservation = await createPaymentLink(preparedReservation);
-      if (preparedReservation.payment_url) {
-        await updateReservationDetails(reservation.id, { payment_url: preparedReservation.payment_url });
-      }
+    if (!reservation?.id || confirmingReservationId) return;
+    if (reservation.status === 'confirmed') {
+      showReservationToast('Reserva já está confirmada.');
+      return;
     }
-    await updateReservationStatus(reservation.id, 'confirmed');
-    const whatsAppUrl = buildWhatsAppUrl(
-      reservation.guest_phone,
-      buildGuestConfirmationMessage(property, preparedReservation, propertyPaymentSettings),
-    );
-    if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
+
+    setAdminNotice('');
+    setConfirmingReservationId(reservation.id);
+    setConfirmedReservationId('');
+
+    try {
+      let preparedReservation = { ...reservation, status: 'confirmed' };
+      if (['pix', 'card'].includes(reservation.payment_method) && !reservation.payment_url) {
+        preparedReservation = await createPaymentLink(preparedReservation);
+        if (preparedReservation.payment_url) {
+          await updateReservationDetails(reservation.id, { payment_url: preparedReservation.payment_url });
+        }
+      }
+      const savedReservation = await updateReservationStatus(reservation.id, 'confirmed');
+      const confirmedReservation = { ...preparedReservation, ...(savedReservation || {}) };
+      setConfirmedReservationId(reservation.id);
+      showReservationToast('Reserva confirmada com sucesso.');
+      setAdminNotice('Reserva confirmada com sucesso.');
+      window.setTimeout(() => {
+        setConfirmedReservationId((current) => (current === reservation.id ? '' : current));
+      }, 1100);
+      const whatsAppUrl = buildWhatsAppUrl(
+        reservation.guest_phone,
+        buildGuestConfirmationMessage(property, confirmedReservation, propertyPaymentSettings),
+      );
+      if (whatsAppUrl) window.open(whatsAppUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Não foi possível confirmar a reserva.', error);
+      setAdminNotice('Não foi possível confirmar a reserva.');
+      showReservationToast('Não foi possível confirmar a reserva.', 'error');
+    } finally {
+      setConfirmingReservationId((current) => (current === reservation.id ? '' : current));
+    }
   }
 
   async function handlePhotoFiles(event) {
@@ -6021,13 +6082,18 @@ function AdminPanel({
 
   async function confirmCancellation() {
     if (!cancelTarget) return;
-    await updateReservationStatus(cancelTarget.id, 'cancelled');
-    await addAdminLog('reservation_cancelled', {
-      reservation_id: cancelTarget.id,
-      guest_name: cancelTarget.guest_name,
-      property_id: cancelTarget.property_id,
-    });
-    setCancelTarget(null);
+    try {
+      await updateReservationStatus(cancelTarget.id, 'cancelled');
+      await addAdminLog('reservation_cancelled', {
+        reservation_id: cancelTarget.id,
+        guest_name: cancelTarget.guest_name,
+        property_id: cancelTarget.property_id,
+      });
+      setCancelTarget(null);
+    } catch (error) {
+      console.error('Não foi possível cancelar a reserva.', error);
+      setAdminNotice('Não foi possível cancelar a reserva.');
+    }
   }
 
   function generateReportPdf() {
@@ -6403,6 +6469,20 @@ function AdminPanel({
 
   return (
     <div className="fixed inset-0 z-40 bg-ink/55 p-1.5 backdrop-blur-sm sm:p-4">
+      {reservationToast ? (
+        <div
+          className={`fixed bottom-4 left-3 right-3 z-[80] mx-auto flex max-w-md items-center gap-3 rounded-md px-4 py-3 text-sm font-black shadow-soft transition-all duration-300 sm:left-auto sm:right-5 ${
+            reservationToast.type === 'error'
+              ? 'border border-red-200 bg-red-50 text-red-700'
+              : 'border border-blue-200 bg-blue-600 text-white'
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {reservationToast.type === 'error' ? <AlertTriangle size={18} aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}
+          <span>{reservationToast.message}</span>
+        </div>
+      ) : null}
       <div className="ml-auto flex h-[calc(100dvh-0.75rem)] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-2rem)]">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
           <div>
@@ -7302,10 +7382,22 @@ function AdminPanel({
 
             <section className={`${['reservations', 'confirmations'].includes(adminView) ? 'block' : 'hidden'} rounded-md bg-white p-4 shadow-sm`}>
               <h3 className="text-xl font-black">Reservas</h3>
+              {adminNotice && ['reservations', 'confirmations'].includes(adminView) ? (
+                <p
+                  className={`mt-3 rounded-md px-3 py-2 text-sm font-bold ${
+                    adminNotice.includes('Não foi possível') ? 'bg-red-50 text-red-700' : 'bg-leaf/10 text-leaf'
+                  }`}
+                >
+                  {adminNotice}
+                </p>
+              ) : null}
               <div className="mt-4 grid gap-3">
                 {visibleReservations.length ? (
                   visibleReservations.map((reservation) => {
                     const expanded = expandedReservationId === reservation.id;
+                    const isConfirming = confirmingReservationId === reservation.id;
+                    const isConfirmSuccess = confirmedReservationId === reservation.id;
+                    const isConfirmed = reservation.status === 'confirmed';
                     return (
                       <div
                         key={reservation.id}
@@ -7319,7 +7411,7 @@ function AdminPanel({
                           {reservation.check_in} até {reservation.check_out} - {reservation.guests} hóspede(s)
                         </p>
                         <p className="mt-1 text-sm font-semibold">
-                          {currency.format(reservation.total_amount || 0)} - {reservation.status}
+                          {currency.format(reservation.total_amount || 0)} - {reservationStatusLabels[reservation.status] || reservation.status}
                         </p>
                         <p className="mt-1 text-sm text-ink/65">
                           {paymentLabels[reservation.payment_method] || 'A combinar'} -{' '}
@@ -7345,16 +7437,41 @@ function AdminPanel({
                             WhatsApp
                           </a>
                         ) : null}
-                        <Button
-                          variant="outline"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            confirmReservation(reservation);
-                          }}
-                        >
-                          <Check size={16} />
-                          Confirmar
-                        </Button>
+                        {isConfirmSuccess ? (
+                          <span className="inline-flex h-11 w-11 animate-pulse items-center justify-center rounded-full bg-leaf text-white shadow-lg shadow-leaf/25 transition-all duration-300">
+                            <Check size={20} aria-hidden="true" />
+                            <span className="sr-only">Reserva confirmada com sucesso.</span>
+                          </span>
+                        ) : isConfirmed ? (
+                          <span className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-leaf/10 px-4 py-2 text-sm font-black text-leaf">
+                            <Check size={16} aria-hidden="true" />
+                            Confirmado
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={Boolean(confirmingReservationId)}
+                            className={`inline-flex min-h-11 items-center justify-center gap-2 overflow-hidden border px-4 py-2 text-sm font-black transition-all duration-300 ease-out disabled:cursor-not-allowed disabled:opacity-80 ${
+                              isConfirming
+                                ? 'h-11 w-11 rounded-full border-blue-500 bg-blue-600 px-0 text-white shadow-lg shadow-blue-500/25'
+                                : 'rounded-md border-ink/15 bg-white text-ink hover:bg-mist'
+                            }`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              confirmReservation(reservation);
+                            }}
+                            aria-label={isConfirming ? 'Confirmando reserva' : 'Confirmar reserva'}
+                          >
+                            {isConfirming ? (
+                              <RefreshCw className="animate-spin" size={18} aria-hidden="true" />
+                            ) : (
+                              <>
+                                <Check size={16} aria-hidden="true" />
+                                <span>Confirmar</span>
+                              </>
+                            )}
+                          </button>
+                        )}
                         {reservation.payment_status !== 'paid' ? (
                           <Button
                             variant="secondary"
