@@ -3897,7 +3897,7 @@ function MarketingHome({
           <div className="absolute inset-0 bg-gradient-to-r from-[#020b18] via-[#06162c]/92 to-[#06162c]/20" />
           <div className="relative mx-auto grid min-h-[720px] max-w-7xl content-center px-4 py-24 sm:px-6 lg:px-8">
             <div className="max-w-[620px] lg:w-[45%]">
-              <h1 className="text-[2.9rem] font-black leading-[0.96] tracking-normal sm:text-6xl lg:text-[4.75rem]">
+              <h1 className="text-[2.5rem] font-black leading-[0.96] tracking-normal sm:text-5xl lg:text-[4rem]">
                 <span className="block">Gerencie suas</span>
                 <span className="block">casas de temporada</span>
                 <span className="block">
