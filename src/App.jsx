@@ -119,15 +119,15 @@ const superAdminAllowedViews = new Set([
   'owners',
   'guests',
   'licenses',
-  'reservations',
   'financial',
-  'suggestions',
   'support',
   'banners',
   'settings',
 ]);
 const superAdminLegacyViews = {
   users: 'owners',
+  reservations: 'dashboard',
+  suggestions: 'support',
 };
 
 function normalizeSuperAdminView(view = 'dashboard') {
@@ -161,6 +161,7 @@ const panelIconMap = {
   event_available: CalendarDays,
   pending_actions: ClipboardList,
   task_alt: Check,
+  fact_check: Check,
   cancel: X,
   support_agent: Headset,
   settings: Settings,
@@ -231,6 +232,7 @@ const platformFinanceStatusLabels = {
   received: 'Recebido',
   expected: 'A receber',
   paid: 'Pago',
+  payable: 'A pagar',
   cancelled: 'Cancelado',
 };
 
@@ -333,10 +335,37 @@ function createEmptyPlatformMovementDraft(type = 'income') {
 
 const reservationStatusLabels = {
   pending: 'Pendente',
-  confirmed: 'Confirmado',
+  confirmed: 'Confirmada',
   blocked: 'Bloqueado manualmente',
-  cancelled: 'Cancelado',
+  cancelled: 'Cancelada',
   maintenance: 'Manutenção',
+};
+
+const tableColumnLabels = {
+  created_at: 'Data e hora',
+  name: 'Nome',
+  email: 'E-mail',
+  user_email: 'E-mail',
+  subject: 'Assunto',
+  category: 'Categoria',
+  message: 'Mensagem',
+  status: 'Status',
+  role: 'Perfil',
+  guest_name: 'Hóspede',
+  guest_email: 'E-mail do hóspede',
+  check_in: 'Check-in',
+  check_out: 'Check-out',
+};
+
+const messageStatusLabels = {
+  new: 'Não lida',
+  unread: 'Não lida',
+  pending: 'Não lida',
+  open: 'Não lida',
+  read: 'Lida',
+  viewed: 'Lida',
+  closed: 'Lida',
+  resolved: 'Lida',
 };
 
 const emptyProperty = {
@@ -433,6 +462,37 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return format(date, 'dd/MM/yyyy HH:mm');
+}
+
+function normalizeMessageStatus(status) {
+  const value = String(status || 'new').toLowerCase();
+  return ['read', 'viewed', 'closed', 'resolved'].includes(value) ? 'read' : 'new';
+}
+
+function messageStatusLabel(status) {
+  return messageStatusLabels[String(status || '').toLowerCase()] || messageStatusLabels[normalizeMessageStatus(status)] || String(status || '-');
+}
+
+function isUnreadMessage(item) {
+  return normalizeMessageStatus(item?.status) === 'new';
+}
+
+function formatTableValue(column, value) {
+  if (column === 'created_at') return formatDateTime(value);
+  if (column === 'role') return roleLabels[normalizeRole(value)] || value || '-';
+  if (column === 'status') {
+    return (
+      reservationStatusLabels[value] ||
+      paymentStatusLabels[value] ||
+      platformFinanceStatusLabels[value] ||
+      messageStatusLabel(value)
+    );
+  }
+  if (column === 'category') {
+    const labels = { duvida: 'Dúvida', sugestao: 'Sugestão', problema: 'Problema', financeiro: 'Financeiro' };
+    return labels[value] || value || '-';
+  }
+  return String(value ?? '-');
 }
 
 function getCalendarAvailability(reservations) {
@@ -1308,7 +1368,7 @@ function MobilePanelDrawer({
           </button>
         </div>
         <nav className="mt-3 grid gap-2">
-          {menu.map(([key, label, icon]) => (
+          {menu.map(([key, label, icon, badgeCount]) => (
             <button
               key={key}
               type="button"
@@ -1321,7 +1381,8 @@ function MobilePanelDrawer({
               }}
             >
               <PanelIcon icon={icon} size={19} />
-              {label}
+              <span className="min-w-0 flex-1 truncate">{label}</span>
+              {badgeCount ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" aria-label={`${badgeCount} novo(s)`} /> : null}
             </button>
           ))}
         </nav>
@@ -2746,11 +2807,13 @@ export default function App() {
             licenseHistory={licenseHistory}
             paymentSettings={paymentSettings}
             suggestions={suggestions}
+            setSuggestions={setSuggestions}
             setLicenseHistory={setLicenseHistory}
             setProfiles={setProfiles}
             setProperties={setProperties}
             authProfile={authProfile}
             supportTickets={supportTickets}
+            setSupportTickets={setSupportTickets}
             onSignOut={signOut}
             onHome={() => navigateTo('/')}
             onRefresh={loadSupabaseData}
@@ -3421,6 +3484,7 @@ export default function App() {
             setInterestRates={setInterestRates}
             saveInterestRates={saveInterestRates}
             suggestions={suggestions}
+            setSuggestions={setSuggestions}
             adminLogs={adminLogs}
             authProfile={authProfile}
             onSignOut={signOut}
@@ -3829,22 +3893,68 @@ function MarketingHome({
       />
       <main>
         <section className="relative overflow-hidden bg-ink text-white">
-          <PropertyPhotoImage className="absolute inset-0 h-full w-full object-cover opacity-45" src={heroPhoto.url} alt={heroPhoto.alt || 'Hospedagem'} />
-          <div className="absolute inset-0 bg-gradient-to-r from-ink via-ink/80 to-ink/35" />
-          <div className="relative mx-auto grid min-h-[640px] max-w-7xl content-center gap-8 px-4 py-20 sm:px-6 lg:px-8">
-            <div className="max-w-3xl">
-              <h1 className="text-5xl font-black leading-tight sm:text-7xl">Hospedex</h1>
-              <p className="mt-5 max-w-2xl text-xl leading-8 text-white/88">
-                Plataforma premium para publicar hospedagens, receber reservas online e administrar propriedades com controle financeiro e licenças.
+          <PropertyPhotoImage className="absolute inset-0 h-full w-full object-cover opacity-70" src={heroPhoto.url} alt={heroPhoto.alt || 'Hospedagem'} />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#020b18] via-[#06162c]/92 to-[#06162c]/20" />
+          <div className="relative mx-auto grid min-h-[720px] max-w-7xl content-center px-4 py-24 sm:px-6 lg:px-8">
+            <div className="max-w-[620px] lg:w-[45%]">
+              <h1 className="text-[2.9rem] font-black leading-[0.96] tracking-normal sm:text-6xl lg:text-[4.75rem]">
+                <span className="block">Gerencie suas</span>
+                <span className="block">casas de temporada</span>
+                <span className="block">
+                  de forma <span className="text-blue-400">simples</span>
+                </span>
+                <span className="block">
+                  e <span className="text-blue-500">profissional</span>
+                </span>
+              </h1>
+              <p className="mt-6 max-w-[510px] text-base font-semibold leading-7 text-slate-200/85 sm:text-lg">
+                Hospedex é a plataforma completa para proprietários de casas de temporada. Mais reservas, menos trabalho e controle total do seu negócio.
               </p>
-              <div className="mt-7 flex flex-wrap gap-3">
-                <Button type="button" onClick={() => onNavigate('/casas')}>Ver hospedagens</Button>
+              <div className="mt-7 grid gap-3 sm:grid-cols-3">
+                {[
+                  ['Mais reservas', 'Aumente sua ocupação', CalendarDays],
+                  ['Menos trabalho', 'Automação inteligente', ChartColumnIncreasing],
+                  ['Controle total', 'Dados e relatórios', ShieldCheck],
+                ].map(([title, text, Icon]) => (
+                  <div key={title} className="rounded-md border border-white/12 bg-white/[0.06] p-3 shadow-sm backdrop-blur">
+                    <Icon size={20} className="text-blue-400" aria-hidden="true" />
+                    <p className="mt-2 text-sm font-black">{title}</p>
+                    <p className="mt-0.5 text-xs font-semibold text-white/62">{text}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+                <Button type="button" className="min-h-12 px-7" onClick={() => onAuth('signup')}>
+                  Começar agora
+                  <ChevronRight size={18} />
+                </Button>
+                <Button type="button" variant="outline" className="min-h-12 border-white/30 bg-white/5 px-7 text-white hover:bg-white/10" onClick={() => onNavigate('/planos')}>
+                  Ver planos
+                  <CreditCard size={17} />
+                </Button>
+              </div>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex -space-x-2">
+                  {['JS', 'AM', 'RF', 'CL'].map((initials, index) => (
+                    <span
+                      key={initials}
+                      className="grid h-10 w-10 place-items-center rounded-full border-2 border-[#06162c] bg-gradient-to-br from-white to-blue-100 text-xs font-black text-ink shadow-sm"
+                      style={{ zIndex: 10 - index }}
+                    >
+                      {initials}
+                    </span>
+                  ))}
+                </div>
+                <p className="max-w-[330px] text-sm font-semibold leading-6 text-white/70">
+                  Junte-se a mais de 1.000+ anfitriões que já transformaram seu negócio
+                </p>
               </div>
             </div>
-            <div className="max-w-5xl">
-              <HousesSearch query={query} setQuery={setQuery} city={city} setCity={setCity} guests={guests} setGuests={setGuests} />
-            </div>
           </div>
+        </section>
+
+        <section className="relative z-10 mx-auto -mt-8 max-w-6xl px-4 sm:px-6 lg:px-8">
+          <HousesSearch query={query} setQuery={setQuery} city={city} setCity={setCity} guests={guests} setGuests={setGuests} />
         </section>
 
         <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
@@ -4451,11 +4561,13 @@ function SuperAdminDashboard({
   licenseHistory,
   paymentSettings = [],
   suggestions,
+  setSuggestions,
   setLicenseHistory,
   setProfiles,
   setProperties,
   authProfile,
   supportTickets,
+  setSupportTickets,
   homeBanners = [],
   setHomeBanners,
   initialView = 'dashboard',
@@ -4528,10 +4640,6 @@ function SuperAdminDashboard({
     owners: owners.length,
     guests: guests.length,
     properties: properties.length,
-    reservations: reservations.length,
-    pending: reservations.filter((reservation) => reservation.status === 'pending').length,
-    confirmed: reservations.filter((reservation) => reservation.status === 'confirmed').length,
-    cancelled: reservations.filter((reservation) => reservation.status === 'cancelled').length,
     activeLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'active').length,
     expiredLicenses: licenses.filter((license) => normalizeLicenseStatus(license) === 'expired').length,
     activeClients: licenses.filter((license) => ['active', 'trial'].includes(normalizeLicenseStatus(license))).length,
@@ -4539,15 +4647,14 @@ function SuperAdminDashboard({
   };
   const monthlyChart = platformMonthlyRows.map((row) => ({ monthKey: row.monthKey, revenue: row.total, reservations: row.licensesSold }));
   const growthChart = buildGrowthRows(profiles);
+  const unreadSupportCount = (supportTickets || []).filter(isUnreadMessage).length;
   const menu = [
     ['dashboard', 'Dashboard', 'dashboard'],
     ['owners', 'Proprietários', 'manage_accounts'],
     ['guests', 'Hóspedes', 'group'],
     ['licenses', 'Licenças', 'vpn_key'],
-    ['reservations', 'Reservas', 'calendar_month'],
     ['financial', 'Financeiro', 'payments'],
-    ['suggestions', 'Sugestões', 'forum'],
-    ['support', 'Suporte', 'support_agent'],
+    ['support', 'Suporte', 'support_agent', unreadSupportCount],
     ['banners', 'Banners/Home', 'image'],
     ['settings', 'Configurações', 'settings'],
   ];
@@ -5024,7 +5131,7 @@ function SuperAdminDashboard({
             </div>
           </div>
           <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:mt-5 lg:grid lg:overflow-visible lg:pb-0">
-            {menu.map(([key, label, icon]) => (
+            {menu.map(([key, label, icon, badgeCount]) => (
               <button
                 key={key}
                 type="button"
@@ -5034,7 +5141,8 @@ function SuperAdminDashboard({
                 onClick={() => changeView(key)}
               >
                 <PanelIcon icon={icon} size={20} />
-                {label}
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                {badgeCount ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" aria-label={`${badgeCount} novo(s)`} /> : null}
               </button>
             ))}
           </nav>
@@ -5075,17 +5183,13 @@ function SuperAdminDashboard({
                 <SuperStat icon="manage_accounts" label="Proprietários" value={stats.owners} />
                 <SuperStat icon="group" label="Hóspedes" value={stats.guests} />
                 <SuperStat icon="home_work" label="Imóveis" value={stats.properties} />
-                <SuperStat icon="event_available" label="Reservas" value={stats.reservations} />
                 <SuperStat icon="payments" label="Resultado mensal" value={currency.format(stats.monthlyRevenue)} />
-                <SuperStat icon="pending_actions" label="Pendentes" value={stats.pending} />
-                <SuperStat icon="task_alt" label="Confirmadas" value={stats.confirmed} />
-                <SuperStat icon="cancel" label="Canceladas" value={stats.cancelled} />
                 <SuperStat icon="vpn_key" label="Licenças ativas" value={stats.activeLicenses} />
                 <SuperStat icon="warning" label="Licenças vencidas" value={stats.expiredLicenses} />
                 <SuperStat icon="verified_user" label="Clientes ativos" value={stats.activeClients} />
               </div>
               <div className="grid gap-5 xl:grid-cols-2">
-                <SuperChart title="Resultado e reservas mensais" rows={monthlyChart} valueKey="revenue" labelKey="monthKey" />
+                <SuperChart title="Resultado mensal" rows={monthlyChart} valueKey="revenue" labelKey="monthKey" />
                 <SuperChart title="Crescimento de usuários" rows={growthChart} valueKey="count" labelKey="monthKey" />
               </div>
             </div>
@@ -5096,9 +5200,6 @@ function SuperAdminDashboard({
           ) : null}
           {view === 'guests' ? (
             <SuperUsersTable title="Hóspedes" rows={guests} notice={userNotice} onRoleChange={updateUserRole} onDeleteUser={deleteUser} />
-          ) : null}
-          {view === 'reservations' ? (
-            <SuperTable title="Reservas" rows={reservations} columns={['guest_name', 'guest_email', 'check_in', 'check_out', 'status']} />
           ) : null}
           {view === 'financial' ? (
             <PlatformFinancialDashboard
@@ -5117,11 +5218,8 @@ function SuperAdminDashboard({
               onSubmit={submitPlatformMovement}
             />
           ) : null}
-          {view === 'suggestions' ? (
-            <SuperTable title="Sugestões" rows={suggestions || []} columns={['created_at', 'name', 'email', 'message', 'status']} />
-          ) : null}
           {view === 'support' ? (
-            <SuperTable title="Tickets de suporte" rows={supportTickets || []} columns={['created_at', 'name', 'user_email', 'subject', 'category', 'message', 'status']} />
+            <SupportTicketsPanel rows={supportTickets || []} setRows={setSupportTickets} />
           ) : null}
           {view === 'banners' ? (
             <div className="grid gap-5">
@@ -5902,9 +6000,9 @@ function SuperTable({ title, rows, columns }) {
               <div className="grid gap-2 text-sm">
                 {columns.map((column) => (
                   <div key={column} className="grid gap-1 rounded-md bg-white p-2">
-                    <span className="text-[11px] font-black uppercase tracking-wide text-ink/45">{column}</span>
+                    <span className="text-[11px] font-black uppercase tracking-wide text-ink/45">{tableColumnLabels[column] || column}</span>
                     <span className="break-words font-semibold text-ink/75">
-                      {column === 'role' ? roleLabels[normalizeRole(row[column])] || row[column] : String(row[column] ?? '-')}
+                      {formatTableValue(column, row[column])}
                     </span>
                   </div>
                 ))}
@@ -5921,7 +6019,7 @@ function SuperTable({ title, rows, columns }) {
             <tr>
               {columns.map((column) => (
                 <th key={column} className="px-4 py-3">
-                  {column}
+                  {tableColumnLabels[column] || column}
                 </th>
               ))}
             </tr>
@@ -5932,7 +6030,7 @@ function SuperTable({ title, rows, columns }) {
                 <tr key={row.id || JSON.stringify(row)} className="border-t border-ink/10">
                   {columns.map((column) => (
                     <td key={column} className="px-4 py-3">
-                      {column === 'role' ? roleLabels[normalizeRole(row[column])] || row[column] : String(row[column] ?? '-')}
+                      {formatTableValue(column, row[column])}
                     </td>
                   ))}
                 </tr>
@@ -5948,6 +6046,197 @@ function SuperTable({ title, rows, columns }) {
         </table>
       </div>
     </div>
+  );
+}
+
+function MessageStatusBadge({ status }) {
+  const unread = normalizeMessageStatus(status) === 'new';
+  return (
+    <span className={`inline-flex w-fit items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-black ${unread ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+      <span className={`h-2 w-2 rounded-full ${unread ? 'bg-red-500' : 'bg-emerald-500'}`} />
+      {messageStatusLabel(status)}
+    </span>
+  );
+}
+
+function MessagePreviewCard({ item, title, meta, preview, expanded, onOpen, onDelete, children }) {
+  return (
+    <article className="rounded-md border border-ink/10 bg-[#f8fbff] p-3 shadow-sm transition hover:border-blue-200 sm:p-4">
+      <button type="button" className="grid w-full gap-3 text-left" onClick={onOpen}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="truncate font-black">{title}</p>
+            <p className="mt-1 text-xs font-semibold text-ink/50">{meta}</p>
+            <p className="mt-2 line-clamp-2 text-sm text-ink/65">{preview || 'Sem mensagem.'}</p>
+          </div>
+          <MessageStatusBadge status={item.status} />
+        </div>
+      </button>
+      {expanded ? (
+        <div className="mt-4 grid gap-3 border-t border-ink/10 pt-4">
+          {children}
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" onClick={onDelete}>
+              <Trash2 size={16} />
+              Excluir
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function SupportTicketsPanel({ rows, setRows }) {
+  const [expandedId, setExpandedId] = useState('');
+  const [notice, setNotice] = useState('');
+
+  async function markRead(ticket) {
+    if (!ticket?.id || !isUnreadMessage(ticket)) return;
+    const previous = rows;
+    setRows?.((current) => current.map((item) => (item.id === ticket.id ? { ...item, status: 'read' } : item)));
+    if (hasSupabaseConfig) {
+      const { error } = await supabase.from('support_tickets').update({ status: 'read' }).eq('id', ticket.id);
+      if (error) {
+        setRows?.(previous);
+        setNotice('Não foi possível marcar o chamado como lido.');
+      }
+    }
+  }
+
+  async function deleteTicket(ticket) {
+    if (!ticket?.id) return;
+    const confirmed = window.confirm('Tem certeza que deseja excluir este chamado?');
+    if (!confirmed) return;
+    const previous = rows;
+    setRows?.((current) => current.filter((item) => item.id !== ticket.id));
+    if (hasSupabaseConfig) {
+      const { error } = await supabase.from('support_tickets').delete().eq('id', ticket.id);
+      if (error) {
+        setRows?.(previous);
+        setNotice('Não foi possível excluir o chamado.');
+      }
+    }
+  }
+
+  return (
+    <section className="grid gap-3 rounded-md bg-white p-4 shadow-sm">
+      <div>
+        <h2 className="text-xl font-black">Suporte</h2>
+        <p className="mt-1 text-sm text-ink/65">Chamados enviados pelos usuários da plataforma.</p>
+      </div>
+      {notice ? <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{notice}</p> : null}
+      <div className="grid gap-3">
+        {rows.length ? (
+          rows.map((ticket) => {
+            const expanded = expandedId === ticket.id;
+            return (
+              <MessagePreviewCard
+                key={ticket.id || `${ticket.email}-${ticket.created_at}`}
+                item={ticket}
+                title={ticket.subject || 'Chamado sem assunto'}
+                meta={`${formatDateTime(ticket.created_at)} • ${ticket.name || 'Usuário'} • ${ticket.user_email || ticket.email || '-'}`}
+                preview={ticket.message}
+                expanded={expanded}
+                onOpen={() => {
+                  setExpandedId(expanded ? '' : ticket.id);
+                  if (!expanded) markRead(ticket);
+                }}
+                onDelete={() => deleteTicket(ticket)}
+              >
+                <div className="grid gap-2 text-sm text-ink/75">
+                  <p><strong>Nome:</strong> {ticket.name || '-'}</p>
+                  <p><strong>E-mail:</strong> {ticket.user_email || ticket.email || '-'}</p>
+                  <p><strong>Assunto:</strong> {ticket.subject || '-'}</p>
+                  <p><strong>Categoria:</strong> {formatTableValue('category', ticket.category)}</p>
+                  <p><strong>Data e hora:</strong> {formatDateTime(ticket.created_at)}</p>
+                  <p className="whitespace-pre-wrap rounded-md bg-white p-3 leading-6 shadow-sm">{ticket.message || '-'}</p>
+                </div>
+              </MessagePreviewCard>
+            );
+          })
+        ) : (
+          <EmptyState title="Nenhum chamado" text="Os chamados de suporte aparecerão aqui." />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function OwnerSuggestionsPanel({ rows, allRows = rows, setRows, properties }) {
+  const [expandedId, setExpandedId] = useState('');
+  const [notice, setNotice] = useState('');
+  const propertyById = useMemo(() => new Map(properties.map((item) => [item.id, item])), [properties]);
+
+  async function markRead(suggestion) {
+    if (!suggestion?.id || !isUnreadMessage(suggestion)) return;
+    const previous = allRows;
+    setRows?.((current) => current.map((item) => (item.id === suggestion.id ? { ...item, status: 'read' } : item)));
+    if (hasSupabaseConfig) {
+      const { error } = await supabase.from('suggestions').update({ status: 'read' }).eq('id', suggestion.id);
+      if (error) {
+        setRows?.(previous);
+        setNotice('Não foi possível marcar a sugestão como lida.');
+      }
+    }
+  }
+
+  async function deleteSuggestion(suggestion) {
+    if (!suggestion?.id) return;
+    const confirmed = window.confirm('Tem certeza que deseja excluir esta sugestão?');
+    if (!confirmed) return;
+    const previous = allRows;
+    setRows?.((current) => current.filter((item) => item.id !== suggestion.id));
+    if (hasSupabaseConfig) {
+      const { error } = await supabase.from('suggestions').delete().eq('id', suggestion.id);
+      if (error) {
+        setRows?.(previous);
+        setNotice('Não foi possível excluir a sugestão.');
+      }
+    }
+  }
+
+  return (
+    <section className="grid gap-3 rounded-md bg-white p-4 shadow-sm">
+      <div>
+        <h3 className="text-xl font-black">Sugestões</h3>
+        <p className="mt-1 text-sm text-ink/65">Mensagens enviadas por hóspedes sobre suas casas.</p>
+      </div>
+      {notice ? <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{notice}</p> : null}
+      <div className="grid gap-3">
+        {rows.length ? (
+          rows.map((suggestion) => {
+            const expanded = expandedId === suggestion.id;
+            const relatedProperty = propertyById.get(suggestion.property_id);
+            return (
+              <MessagePreviewCard
+                key={suggestion.id || `${suggestion.email}-${suggestion.created_at}`}
+                item={suggestion}
+                title={suggestion.name || suggestion.user_email || 'Sugestão recebida'}
+                meta={`${formatDateTime(suggestion.created_at)} • ${relatedProperty?.name || 'Casa relacionada'}`}
+                preview={suggestion.message}
+                expanded={expanded}
+                onOpen={() => {
+                  setExpandedId(expanded ? '' : suggestion.id);
+                  if (!expanded) markRead(suggestion);
+                }}
+                onDelete={() => deleteSuggestion(suggestion)}
+              >
+                <div className="grid gap-2 text-sm text-ink/75">
+                  <p><strong>Nome completo:</strong> {suggestion.name || '-'}</p>
+                  <p><strong>E-mail:</strong> {suggestion.user_email || suggestion.email || '-'}</p>
+                  <p><strong>Casa relacionada:</strong> {relatedProperty?.name || '-'}</p>
+                  <p><strong>Data e hora:</strong> {formatDateTime(suggestion.created_at)}</p>
+                  <p className="whitespace-pre-wrap rounded-md bg-white p-3 leading-6 shadow-sm">{suggestion.message || '-'}</p>
+                </div>
+              </MessagePreviewCard>
+            );
+          })
+        ) : (
+          <EmptyState title="Nenhuma sugestão" text="As sugestões dos hóspedes aparecerão aqui." />
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -6787,9 +7076,9 @@ function ManualReservationEditor({ reservation, onSave }) {
         <Field label="Status">
           <SelectInput value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
             <option value="pending">Pendente</option>
-            <option value="confirmed">Confirmado</option>
+            <option value="confirmed">Confirmada</option>
             <option value="blocked">Bloqueado manualmente</option>
-            <option value="cancelled">Cancelado</option>
+            <option value="cancelled">Cancelada</option>
             <option value="maintenance">Manutenção</option>
           </SelectInput>
         </Field>
@@ -6942,6 +7231,7 @@ function AdminPanel({
   setInterestRates,
   saveInterestRates,
   suggestions,
+  setSuggestions,
   adminLogs,
   authProfile,
   onSignOut,
@@ -6974,7 +7264,9 @@ function AdminPanel({
   const [loginError, setLoginError] = useState('');
   const [loginNotice, setLoginNotice] = useState('');
   const [expandedReservationId, setExpandedReservationId] = useState('');
-  const [showNewProperty, setShowNewProperty] = useState(() => readLocalData(ownerPropertyDraftOpenKey, false));
+  const [showNewProperty, setShowNewProperty] = useState(false);
+  const [editingPropertyFormOpen, setEditingPropertyFormOpen] = useState(false);
+  const [manualReservationOpen, setManualReservationOpen] = useState(false);
   const [reportType, setReportType] = useState('summary');
   const [adminView, setAdminView] = useState(() => readLocalData(uiStateKeys.adminView, initialView || 'dashboard'));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -7055,6 +7347,10 @@ function AdminPanel({
   const visibleReservations = reservations.filter((reservation) => reservation.status !== 'cancelled');
   const pendingReservations = reservations.filter((reservation) => reservation.status === 'pending');
   const confirmedReservations = reservations.filter((reservation) => reservation.status === 'confirmed');
+  const cancelledReservations = reservations.filter((reservation) => reservation.status === 'cancelled');
+  const ownerPropertyIds = new Set(properties.map((item) => item.id));
+  const ownerSuggestions = (suggestions || []).filter((suggestion) => ownerPropertyIds.has(suggestion.property_id));
+  const unreadOwnerSuggestionCount = ownerSuggestions.filter(isUnreadMessage).length;
   const monthlyFinancialRows = useMemo(() => buildMonthlyFinancialRows(cashMovements), [cashMovements]);
   const adminMenu = [
     ['dashboard', 'Dashboard', 'dashboard'],
@@ -7065,6 +7361,7 @@ function AdminPanel({
     ['cash', 'Caixa', 'account_balance_wallet'],
     ['reports', 'Relatórios', 'description'],
     ['clients', 'Clientes', 'groups'],
+    ...(normalizeRole(authProfile?.role) === 'proprietario' ? [['suggestions', 'Sugestões', 'forum', unreadOwnerSuggestionCount]] : []),
     ['admin', 'Dados do administrador', 'person'],
     ['settings', 'Configurações', 'settings'],
   ];
@@ -7120,7 +7417,8 @@ function AdminPanel({
   }, []);
 
   useEffect(() => {
-    setShowNewProperty(readLocalData(ownerPropertyDraftOpenKey, false));
+    setShowNewProperty(false);
+    writeLocalData(ownerPropertyDraftOpenKey, false);
     setNewProperty(readLocalData(ownerPropertyDraftKey, createEmptyPropertyDraft()));
   }, [ownerPropertyDraftKey, ownerPropertyDraftOpenKey]);
 
@@ -7266,6 +7564,7 @@ function AdminPanel({
       amenities: parseAdminList(draft.amenities),
       rules: parseAdminList(draft.rules),
     });
+    setEditingPropertyFormOpen(false);
   }
 
   async function submitNewProperty(event) {
@@ -7286,6 +7585,7 @@ function AdminPanel({
     writeLocalData(ownerPropertyDraftKey, cleanDraft);
     writeLocalData(ownerPropertyDraftOpenKey, false);
     setShowNewProperty(false);
+    setEditingPropertyFormOpen(false);
   }
 
   async function submitAdminDetails(event) {
@@ -7336,6 +7636,7 @@ function AdminPanel({
           : 'Licença ativa necessária para cadastrar casas.',
       );
       setShowNewProperty(false);
+      setEditingPropertyFormOpen(false);
       return;
     }
 
@@ -7346,11 +7647,13 @@ function AdminPanel({
     );
     setNewProperty(readLocalData(ownerPropertyDraftKey, createEmptyPropertyDraft()));
     setShowNewProperty(true);
+    setEditingPropertyFormOpen(false);
   }
 
   function startEditProperty(propertyId) {
     onSelectProperty(propertyId);
     setShowNewProperty(false);
+    setEditingPropertyFormOpen(true);
   }
 
   async function copyPropertyLink(propertyItem) {
@@ -7453,6 +7756,7 @@ function AdminPanel({
       payment_method: 'cash',
       notes: '',
     });
+    setManualReservationOpen(false);
   }
 
   async function submitCashMovement(event) {
@@ -7523,7 +7827,7 @@ function AdminPanel({
           rows: activeReservations.map((reservation) => [
             reservation.guest_name || '-',
             `${reservation.check_in} ate ${reservation.check_out}`,
-            reservation.status || '-',
+            reservationStatusLabels[reservation.status] || reservation.status || '-',
             paymentLabels[reservation.payment_method] || 'A combinar',
             currency.format(reservation.total_amount || 0),
           ]),
@@ -7546,7 +7850,7 @@ function AdminPanel({
             movement.due_date || '-',
             movement.description || 'Lancamento',
             isExpenseMovement(movement) ? 'Despesa' : 'Receita',
-            movement.status || '-',
+            getMovementStatusLabel(movement),
             paymentLabels[movement.payment_method] || movement.payment_method || '-',
             `${isExpenseMovement(movement) ? '-' : '+'}${currency.format(getMovementAmount(movement))}`,
           ]),
@@ -7692,7 +7996,7 @@ function AdminPanel({
           movement.due_date || '',
           movement.description || '',
           isExpenseMovement(movement) ? 'Despesa' : 'Receita',
-          movement.status || '',
+          getMovementStatusLabel(movement),
           paymentLabels[movement.payment_method] || movement.payment_method || '',
           isExpenseMovement(movement) ? -getMovementAmount(movement) : getMovementAmount(movement),
         ]),
@@ -7754,7 +8058,7 @@ function AdminPanel({
       ],
       reservations: activeReservations.map(
         (reservation) =>
-          `${reservation.guest_name} | ${reservation.check_in} até ${reservation.check_out} | ${reservation.status} | ${currency.format(reservation.total_amount || 0)}`,
+          `${reservation.guest_name} | ${reservation.check_in} até ${reservation.check_out} | ${reservationStatusLabels[reservation.status] || reservation.status} | ${currency.format(reservation.total_amount || 0)}`,
       ),
       financial: [
         `Receita prevista: ${currency.format(totalRevenue)}`,
@@ -8027,7 +8331,7 @@ function AdminPanel({
                 <p className="mt-1 truncate text-xs font-semibold text-ink/55">{adminDetails.email || authProfile?.email || adminEmail}</p>
               </div>
               <nav className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
-                {adminMenu.map(([key, label, icon]) => (
+                {adminMenu.map(([key, label, icon, badgeCount]) => (
                   <button
                     key={key}
                     type="button"
@@ -8037,7 +8341,8 @@ function AdminPanel({
                     onClick={() => changeAdminView(key)}
                   >
                     <PanelIcon icon={icon} size={18} />
-                    {label}
+                    <span className="min-w-0 flex-1 truncate">{label}</span>
+                    {badgeCount ? <span className="h-2.5 w-2.5 rounded-full bg-red-500" aria-label={`${badgeCount} novo(s)`} /> : null}
                   </button>
                 ))}
               </nav>
@@ -8108,20 +8413,24 @@ function AdminPanel({
                     Cadastre uma casa por vez ou edite uma casa existente.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-700 text-2xl font-black leading-none text-white shadow-[0_16px_34px_rgba(37,99,235,0.36)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_42px_rgba(37,99,235,0.44)]"
-                  onClick={() => {
-                    if (showNewProperty) {
-                      setShowNewProperty(false);
-                    } else {
-                      startNewProperty();
-                    }
-                  }}
-                  aria-label={showNewProperty ? 'Cancelar cadastro de casa' : 'Cadastrar nova casa'}
-                >
-                  {showNewProperty ? <X size={22} /> : <Plus size={22} />}
-                </button>
+                {ownerReachedPropertyLimit && !showNewProperty ? (
+                  <span className="rounded-md bg-red-50 px-3 py-2 text-sm font-black text-red-700">Limite de imóveis atingido.</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-700 text-2xl font-black leading-none text-white shadow-[0_16px_34px_rgba(37,99,235,0.36)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_42px_rgba(37,99,235,0.44)]"
+                    onClick={() => {
+                      if (showNewProperty) {
+                        setShowNewProperty(false);
+                      } else {
+                        startNewProperty();
+                      }
+                    }}
+                    aria-label={showNewProperty ? 'Cancelar cadastro de casa' : 'Cadastrar nova casa'}
+                  >
+                    {showNewProperty ? <X size={22} /> : <Plus size={22} />}
+                  </button>
+                )}
               </div>
               {copyNotice ? <p className="rounded-md bg-leaf/10 px-3 py-2 text-sm font-bold text-leaf">{copyNotice}</p> : null}
               {adminNotice && adminView === 'houses' ? <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{adminNotice}</p> : null}
@@ -8152,7 +8461,15 @@ function AdminPanel({
                         : 'border-ink/10 bg-white hover:border-blue-200 hover:bg-[#f8fbff]'
                     }`}
                   >
-                    <button type="button" className="flex min-w-0 items-center gap-3 text-left" onClick={() => startEditProperty(item.id)}>
+                    <button
+                      type="button"
+                      className="flex min-w-0 items-center gap-3 text-left"
+                      onClick={() => {
+                        onSelectProperty(item.id);
+                        setShowNewProperty(false);
+                        setEditingPropertyFormOpen(false);
+                      }}
+                    >
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-white text-leaf shadow-sm">
                         <Home size={20} aria-hidden="true" />
                       </span>
@@ -8167,7 +8484,7 @@ function AdminPanel({
                     <div className="grid grid-cols-4 gap-2 sm:flex sm:justify-end">
                       <Button
                         type="button"
-                        variant={item.id === property.id && !showNewProperty ? 'secondary' : 'outline'}
+                        variant={item.id === property.id && editingPropertyFormOpen ? 'secondary' : 'outline'}
                         className="h-10 w-10 px-0 sm:w-auto sm:px-3"
                         onClick={() => startEditProperty(item.id)}
                         aria-label={`Editar ${item.name}`}
@@ -8213,10 +8530,14 @@ function AdminPanel({
                   <div className="rounded-md border border-dashed border-ink/20 bg-[#f4f8ff] p-5 text-center">
                     <p className="font-black">Nenhuma casa cadastrada</p>
                     <p className="mt-2 text-sm text-ink/60">Adicione sua primeira casa quando a licenca estiver ativa.</p>
-                    <Button type="button" className="mt-4" onClick={startNewProperty}>
-                      <Plus size={18} />
-                      Adicionar casa
-                    </Button>
+                    {!ownerReachedPropertyLimit ? (
+                      <Button type="button" className="mt-4" onClick={startNewProperty}>
+                        <Plus size={18} />
+                        Adicionar casa
+                      </Button>
+                    ) : (
+                      <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-700">Limite de imóveis atingido.</p>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -8589,7 +8910,7 @@ function AdminPanel({
               </div>
             </section>
 
-            <form className={`${adminView === 'houses' && !showNewProperty ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`} onSubmit={submitProperty}>
+            <form className={`${adminView === 'houses' && editingPropertyFormOpen ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`} onSubmit={submitProperty}>
               <h3 className="text-xl font-black">Dados da casa</h3>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Nome">
@@ -8704,7 +9025,7 @@ function AdminPanel({
             </form>
 
             <form
-              className={`${adminView === 'houses' && !showNewProperty ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}
+              className={`${adminView === 'houses' && editingPropertyFormOpen ? 'grid' : 'hidden'} gap-4 rounded-md bg-white p-4 shadow-sm`}
               onSubmit={submitPhoto}
             >
               <h3 className="text-xl font-black">Fotos da casa</h3>
@@ -8773,7 +9094,21 @@ function AdminPanel({
             </form>
 
             {adminView === 'reservations' ? (
-              <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitManualReservation}>
+              <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <FinanceCard icon="task_alt" label="Confirmadas" value={confirmedReservations.length} />
+                  <FinanceCard icon="pending_actions" label="Pendentes" value={pendingReservations.length} />
+                  <FinanceCard icon="cancel" label="Canceladas" value={cancelledReservations.length} />
+                </div>
+                {!manualReservationOpen ? (
+                  <div className="flex justify-end">
+                    <Button type="button" onClick={() => setManualReservationOpen(true)}>
+                      <Plus size={18} />
+                      Nova reserva manual
+                    </Button>
+                  </div>
+                ) : (
+              <form className="grid gap-4 rounded-md border border-ink/10 bg-[#f8fbff] p-4" onSubmit={submitManualReservation}>
                 <div>
                   <h3 className="text-xl font-black">Reserva manual e bloqueio de datas</h3>
                   <p className="mt-1 text-sm text-ink/65">Use para reservas fora do site, manutenção ou indisponibilidade.</p>
@@ -8792,7 +9127,7 @@ function AdminPanel({
                       onChange={(event) => setManualReservation({ ...manualReservation, status: event.target.value })}
                     >
                       <option value="pending">Pendente</option>
-                      <option value="confirmed">Confirmado</option>
+                      <option value="confirmed">Confirmada</option>
                       <option value="blocked">Bloqueado manualmente</option>
                       <option value="maintenance">Manutenção</option>
                     </SelectInput>
@@ -8848,11 +9183,18 @@ function AdminPanel({
                     placeholder="Origem da reserva, motivo do bloqueio ou detalhes internos"
                   />
                 </Field>
-                <Button type="submit" variant="secondary">
-                  <CalendarDays size={18} />
-                  Criar reserva manual
-                </Button>
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button type="button" variant="outline" onClick={() => setManualReservationOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" variant="secondary">
+                    <CalendarDays size={18} />
+                    Criar reserva manual
+                  </Button>
+                </div>
               </form>
+                )}
+              </section>
             ) : null}
 
             <section className={`${['reservations', 'confirmations'].includes(adminView) ? 'block' : 'hidden'} rounded-md bg-white p-4 shadow-sm`}>
@@ -8920,7 +9262,7 @@ function AdminPanel({
                         ) : isConfirmed ? (
                           <span className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-leaf/10 px-4 py-2 text-sm font-black text-leaf">
                             <Check size={16} aria-hidden="true" />
-                            Confirmado
+                            Confirmada
                           </span>
                         ) : (
                           <button
@@ -9009,6 +9351,10 @@ function AdminPanel({
                     ))}
                 </div>
               </section>
+            ) : null}
+
+            {adminView === 'suggestions' && normalizeRole(authProfile?.role) === 'proprietario' ? (
+              <OwnerSuggestionsPanel rows={ownerSuggestions} allRows={suggestions || []} setRows={setSuggestions} properties={properties} />
             ) : null}
 
             {adminView === 'admin' ? (
@@ -9260,17 +9606,6 @@ function AdminPanel({
                     Salvar dados financeiros
                   </Button>
                 </form>
-                <div className="rounded-md bg-[#f4f8ff] p-4">
-                  <p className="font-black">Sugestões recebidas</p>
-                  <div className="mt-3 grid gap-2">
-                    {suggestions.slice(0, 5).map((suggestion) => (
-                      <p key={suggestion.id} className="rounded-md bg-white p-3 text-sm shadow-sm">
-                        {suggestion.message}
-                      </p>
-                    ))}
-                    {!suggestions.length ? <p className="text-sm text-ink/60">Nenhuma sugestão ainda.</p> : null}
-                  </div>
-                </div>
               </section>
             ) : null}
             {cancelTarget ? (
