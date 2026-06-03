@@ -2799,46 +2799,46 @@ export default function App() {
         }
         style={propertyThemeStyle}
       >
-      <header className="sticky top-0 z-30 border-b border-blue-100/80 bg-white/95 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/95">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
-          <a href="#inicio" className="flex items-center gap-3 font-bold text-ink dark:text-white">
+      <header className="site-header sticky top-0 z-30 border-b backdrop-blur">
+        <div className="header-inner mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <a href="#inicio" className="header-brand flex min-w-0 items-center gap-3 font-bold">
             <span className="grid h-10 w-10 place-items-center rounded-md text-white" style={{ background: 'var(--property-accent)' }}>
               <DoorOpen size={20} />
             </span>
-            <span>{property.name}</span>
+            <span className="hidden truncate sm:block">{property.name}</span>
           </a>
-          <nav className="hidden items-center gap-6 text-sm font-bold text-ink/75 md:flex dark:text-white/75">
-            <a className="transition hover:text-ink dark:hover:text-white" href="#fotos">Fotos</a>
-            <a className="transition hover:text-ink dark:hover:text-white" href="#calendario">Calendário</a>
-            <a className="transition hover:text-ink dark:hover:text-white" href="#reserva">Reservar</a>
-            <a className="transition hover:text-ink dark:hover:text-white" href="#sugestoes">Sugestões</a>
+          <nav className="hidden items-center gap-6 text-sm font-black md:flex">
+            <a className="header-link" href="#fotos">Fotos</a>
+            <a className="header-link" href="#calendario">Calendário</a>
+            <a className="header-link" href="#reserva">Reservar</a>
+            <a className="header-link" href="#sugestoes">Sugestões</a>
           </nav>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
+            <button
+              type="button"
+              className="header-theme-button"
               onClick={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
               aria-label="Alternar tema"
-              className="px-3"
             >
               {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            </Button>
+            </button>
             {authProfile ? (
-              <Button
-                variant="outline"
+              <button
+                type="button"
+                className="header-login-button px-3"
                 onClick={() => {
                   if (normalizeRole(authProfile.role) === 'super_admin') openSuperAdminSection('dashboard');
                   else if (normalizeRole(authProfile.role) === 'proprietario' || adminUnlocked) openAdminSection('dashboard');
                   else openClientSection('reservations');
                 }}
                 aria-label="Abrir menu do usuario"
-                className="px-3"
               >
                 <User size={18} />
-              </Button>
+              </button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => openAuth('login')}>Login</Button>
-                <Button onClick={() => openAuth('signup')}>Cadastrar</Button>
+                <button type="button" className="header-login-button px-3 sm:px-5" onClick={() => openAuth('login')}>Entrar</button>
+                <button type="button" className="header-primary-action hidden sm:inline-flex" onClick={() => openAuth('signup')}>Começar agora</button>
               </>
             )}
           </div>
@@ -3396,7 +3396,7 @@ function PublicTopBar({
   onToggleTheme,
 }) {
   const role = normalizeRole(authProfile?.role);
-  const linkClass = `inline-flex items-center gap-2 transition ${transparent ? 'hover:text-white' : 'hover:text-leaf'}`;
+  const linkClass = 'header-link inline-flex items-center gap-2';
   const menuItems =
     role === 'super_admin'
       ? [
@@ -3436,37 +3436,34 @@ function PublicTopBar({
   };
 
   const brand = (
-    <button type="button" className="flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
-      <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-11 w-11 rounded-md shadow-sm" />
+    <button type="button" className="header-brand flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
+      <span className="header-brand-mark grid h-12 w-12 shrink-0 place-items-center rounded-xl">
+        <BrandLogo variant={transparent ? 'white' : 'horizontal'} className="h-10 w-10 rounded-lg" />
+      </span>
+      <span className="hidden text-lg font-black tracking-tight sm:block">Hospedex</span>
     </button>
   );
   const navigation = (
-    <nav className="hidden items-center gap-5 text-sm font-bold md:flex">
+    <nav className="hidden items-center gap-8 text-sm font-black lg:flex">
       <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>
-        <Home size={16} />
-        Hospedagens
+        Recursos
       </button>
       <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>
-        <BadgeDollarSign size={16} />
         Planos
       </button>
       <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
-        <ShieldCheck size={16} />
         Sobre
       </button>
-      <a className={linkClass} href={socialLinks.instagram} target="_blank" rel="noreferrer" aria-label="Instagram">
-        <Instagram size={18} />
-      </a>
-      <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer" aria-label="Email">
-        <Mail size={18} />
-      </a>
-      <a className={linkClass} href={socialLinks.twitter} target="_blank" rel="noreferrer" aria-label="Twitter X">
-        <Twitter size={18} />
+      <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
+        Blog
+      </button>
+      <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer">
+        Contato
       </a>
     </nav>
   );
   const themeToggle = (
-    <button type="button" className="brand-icon-button" onClick={onToggleTheme} aria-label="Alternar tema" title="Alternar tema">
+    <button type="button" className="header-theme-button" onClick={onToggleTheme} aria-label="Alternar tema" title="Alternar tema">
       {themeMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
@@ -3481,14 +3478,12 @@ function PublicTopBar({
     />
   ) : (
     <div className="flex items-center gap-2">
-      <Button type="button" variant="outline" className="px-3 sm:px-5" onClick={() => onAuth?.('login') || onNavigate('/login')}>
-        <Lock size={17} />
-        Login
-      </Button>
-      <Button type="button" className="hidden sm:inline-flex" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
-        <UserPlus size={17} />
-        Cadastrar
-      </Button>
+      <button type="button" className="header-login-button px-3 sm:px-5" onClick={() => onAuth?.('login') || onNavigate('/login')}>
+        Entrar
+      </button>
+      <button type="button" className="header-primary-action hidden sm:inline-flex" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
+        Começar agora
+      </button>
     </div>
   );
 
