@@ -1885,6 +1885,15 @@ export default function App() {
       });
       return;
     }
+    if (route === '/blog') {
+      updateSeo({
+        title: 'Blog | Hospedex',
+        description: 'Conteudos sobre gestao de casas de temporada, reservas online, experiencia do hospede e financeiro.',
+        image,
+        url: `${origin}/blog`,
+      });
+      return;
+    }
     if (route === '/sobre') {
       updateSeo({
         title: 'Sobre | Hospedex',
@@ -2775,6 +2784,22 @@ export default function App() {
     );
   }
 
+  if (route === '/blog') {
+    return (
+      <BlogPage
+        authProfile={authProfile}
+        onNavigate={navigateTo}
+        onAuth={openAuth}
+        onOpenAdmin={openAdminSection}
+        onOpenClient={openClientSection}
+        onOpenSuperAdmin={openSuperAdminSection}
+        onSignOut={signOut}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+      />
+    );
+  }
+
   if (route === '/sobre') {
     return (
       <AboutPage
@@ -2850,8 +2875,8 @@ export default function App() {
               </button>
             ) : (
               <>
-                <button type="button" className="header-login-button px-3 sm:px-5" onClick={() => openAuth('login')}>Entrar</button>
-                <button type="button" className="header-primary-action hidden sm:inline-flex" onClick={() => openAuth('signup')}>Começar agora</button>
+                <button type="button" className="header-login-button px-3 sm:px-5" onClick={() => openAuth('login')}>Login</button>
+                <button type="button" className="header-primary-action hidden sm:inline-flex" onClick={() => openAuth('signup')}>Cadastrar</button>
               </>
             )}
           </div>
@@ -3410,33 +3435,6 @@ function PublicTopBar({
 }) {
   const role = normalizeRole(authProfile?.role);
   const linkClass = 'header-link inline-flex items-center gap-2 whitespace-nowrap';
-  const menuItems =
-    role === 'super_admin'
-      ? [
-          ['Painel super admin', () => onOpenSuperAdmin?.('dashboard'), ShieldCheck],
-          ['Proprietários', () => onOpenSuperAdmin?.('owners'), CircleUserRound],
-          ['Hóspedes', () => onOpenSuperAdmin?.('guests'), Users],
-          ['Licenças', () => onOpenSuperAdmin?.('licenses'), KeyRound],
-          ['Sugestões', () => onOpenSuperAdmin?.('suggestions'), Lightbulb],
-          ['Logs', () => onOpenSuperAdmin?.('settings'), Logs],
-          ['Banners/Home', () => onOpenSuperAdmin?.('banners'), ImagePlus],
-        ]
-      : role === 'proprietario'
-        ? [
-            ['Meu perfil', () => onOpenAdmin?.('admin'), CircleUserRound],
-            ['Minhas propriedades', () => onOpenAdmin?.('houses'), Home],
-            ['Reservas', () => onOpenAdmin?.('reservations'), CalendarDays],
-            ['Financeiro', () => onOpenAdmin?.('cash'), Wallet],
-            ['Copiar links', () => onOpenAdmin?.('houses'), Link2],
-          ]
-        : role === 'hospede'
-          ? [
-              ['Meu perfil', () => onOpenClient?.('profile'), CircleUserRound],
-              ['Minhas reservas', () => onOpenClient?.('reservations'), CalendarDays],
-              ['Suporte', () => onOpenClient?.('support'), Headset],
-              ['Configurações', () => onOpenClient?.('settings'), Settings],
-            ]
-          : [];
   const openSupport = () => {
     if (role === 'hospede') onOpenClient?.('support');
     else if (role === 'super_admin') onOpenSuperAdmin?.('support');
@@ -3447,6 +3445,22 @@ function PublicTopBar({
     else if (role === 'super_admin') onOpenSuperAdmin?.('settings');
     else onOpenAdmin?.('settings');
   };
+  const openProfile = () => {
+    if (role === 'hospede') onOpenClient?.('profile');
+    else if (role === 'super_admin') onOpenSuperAdmin?.('dashboard');
+    else onOpenAdmin?.('admin');
+  };
+  const openNotifications = () => {
+    if (role === 'hospede') onOpenClient?.('reservations');
+    else if (role === 'super_admin') onOpenSuperAdmin?.('support');
+    else onOpenAdmin?.('reservations');
+  };
+  const notificationCount = Number(
+    authProfile?.pending_notifications ??
+      authProfile?.notification_count ??
+      authProfile?.notifications_count ??
+      0,
+  ) || 0;
 
   const brand = (
     <button type="button" className="header-brand flex min-w-0 items-center gap-3" onClick={() => onNavigate('/')} aria-label="Ir para a home">
@@ -3467,6 +3481,9 @@ function PublicTopBar({
       <button type="button" className={linkClass} onClick={() => onNavigate('/#conheca-plataforma')}>
         Conheça a Plataforma
       </button>
+      <button type="button" className={linkClass} onClick={() => onNavigate('/blog')}>
+        Blog
+      </button>
       <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer">
         Contato
       </a>
@@ -3480,19 +3497,22 @@ function PublicTopBar({
   const account = authProfile ? (
     <UserMenu
       authProfile={authProfile}
-      menuItems={menuItems}
-      onNavigate={onNavigate}
+      notificationCount={notificationCount}
       onSignOut={onSignOut}
+      onOpenProfile={openProfile}
+      onOpenNotifications={openNotifications}
       onOpenSupport={openSupport}
       onOpenSettings={openSettings}
+      onToggleTheme={onToggleTheme}
+      themeMode={themeMode}
     />
   ) : (
     <div className="flex items-center gap-2">
       <button type="button" className="header-login-button px-3 sm:px-5" onClick={() => onAuth?.('login') || onNavigate('/login')}>
-        Entrar
+        Login
       </button>
       <button type="button" className="header-primary-action hidden sm:inline-flex" onClick={() => onAuth?.('signup') || onNavigate('/login')}>
-        Começar agora
+        Cadastrar
       </button>
     </div>
   );
@@ -4117,6 +4137,68 @@ function PlansPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient,
             </article>
           ))}
         </div>
+      </main>
+      <SiteFooter onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function BlogPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut, themeMode, onToggleTheme }) {
+  const posts = [
+    {
+      title: 'Como organizar reservas sem perder disponibilidade',
+      description: 'Boas praticas para centralizar pedidos, status e calendario sem depender de conversas espalhadas.',
+      Icon: CalendarDays,
+    },
+    {
+      title: 'O que acompanhar no caixa de uma casa de temporada',
+      description: 'Receitas, despesas, previsoes e total liquido ajudam o proprietario a decidir com mais seguranca.',
+      Icon: Wallet,
+    },
+    {
+      title: 'Por que o portal do hospede melhora a experiencia',
+      description: 'Um espaco simples para reservas, suporte e informacoes reduz duvidas e aumenta a confianca.',
+      Icon: Users,
+    },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#f4f8ff] text-ink">
+      <PublicTopBar
+        authProfile={authProfile}
+        onNavigate={onNavigate}
+        onAuth={onAuth}
+        onOpenAdmin={onOpenAdmin}
+        onOpenClient={onOpenClient}
+        onOpenSuperAdmin={onOpenSuperAdmin}
+        onSignOut={onSignOut}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
+      />
+      <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <section className="grid gap-6 rounded-md bg-white p-6 shadow-sm ring-1 ring-ink/10 sm:p-8">
+          <div className="max-w-3xl">
+            <p className="text-sm font-black uppercase tracking-wide text-leaf">Blog Hospedex</p>
+            <h1 className="mt-3 text-4xl font-black sm:text-5xl">Ideias para vender melhor e administrar com menos trabalho</h1>
+            <p className="mt-5 text-lg leading-8 text-ink/65">
+              Conteudos praticos sobre reservas online, gestao de propriedades, experiencia do hospede e financeiro para casas de temporada.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            {posts.map(({ title, description, Icon }) => (
+              <article key={title} className="rounded-md bg-[#f4f8ff] p-5 ring-1 ring-ink/10">
+                <Icon className="text-leaf" size={24} aria-hidden="true" />
+                <h2 className="mt-4 text-xl font-black">{title}</h2>
+                <p className="mt-3 text-sm font-semibold leading-6 text-ink/65">{description}</p>
+              </article>
+            ))}
+          </div>
+          <div>
+            <Button type="button" onClick={() => onNavigate('/#conheca-plataforma')}>
+              Conhecer a plataforma
+            </Button>
+          </div>
+        </section>
       </main>
       <SiteFooter onNavigate={onNavigate} />
     </div>
