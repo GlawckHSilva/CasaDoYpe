@@ -33,6 +33,7 @@ import {
   LogOut,
   Logs,
   Mail,
+  Menu,
   MapPin,
   MessageCircle,
   Moon,
@@ -1281,6 +1282,66 @@ function Button({ children, className = '', variant = 'primary', ...props }) {
   );
 }
 
+function MobilePanelDrawer({
+  open,
+  onClose,
+  title,
+  subtitle,
+  menu = [],
+  activeKey,
+  onChange,
+  onHome,
+  onSignOut,
+  homeLabel = 'Site',
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[80] bg-ink/55 backdrop-blur-sm lg:hidden">
+      <div className="h-full w-[min(86vw,20rem)] overflow-y-auto bg-white p-3 text-ink shadow-soft dark:bg-slate-950 dark:text-white">
+        <div className="flex items-start justify-between gap-3 rounded-md bg-ink p-3 text-white">
+          <div className="min-w-0">
+            <p className="font-black">{title}</p>
+            {subtitle ? <p className="mt-1 truncate text-xs text-white/65">{subtitle}</p> : null}
+          </div>
+          <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-white/10" onClick={onClose} aria-label="Fechar menu">
+            <X size={18} />
+          </button>
+        </div>
+        <nav className="mt-3 grid gap-2">
+          {menu.map(([key, label, icon]) => (
+            <button
+              key={key}
+              type="button"
+              className={`flex min-h-11 items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-black transition ${
+                activeKey === key ? 'bg-leaf text-white' : 'hover:bg-mist dark:hover:bg-white/5'
+              }`}
+              onClick={() => {
+                onChange?.(key);
+                onClose?.();
+              }}
+            >
+              <PanelIcon icon={icon} size={19} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="mt-4 grid gap-2 border-t border-ink/10 pt-3 dark:border-white/10">
+          {onHome ? (
+            <Button type="button" variant="outline" onClick={onHome}>
+              {homeLabel}
+            </Button>
+          ) : null}
+          {onSignOut ? (
+            <Button type="button" variant="secondary" onClick={onSignOut}>
+              Sair
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Field({ label, children }) {
   return (
     <label className="grid gap-1.5 text-[13px] font-semibold text-ink sm:gap-2 sm:text-sm">
@@ -1694,7 +1755,7 @@ export default function App() {
 
   useEffect(() => {
     if (route === '/sobre') {
-      navigateTo('/#conheca-plataforma', { replace: true });
+      navigateTo('/conheca-a-plataforma', { replace: true });
     }
   }, [route]);
 
@@ -1882,6 +1943,15 @@ export default function App() {
         description: 'Planos mensal, semestral e anual para proprietarios que querem publicar hospedagens no Hospedex.',
         image,
         url: `${origin}/planos`,
+      });
+      return;
+    }
+    if (route === '/conheca-a-plataforma' || route === '/plataforma') {
+      updateSeo({
+        title: 'Conheça a Plataforma | Hospedex',
+        description: 'Conheca os recursos do Hospedex para reservas, painel do proprietario, financeiro, licencas e portal do hospede.',
+        image,
+        url: `${origin}/conheca-a-plataforma`,
       });
       return;
     }
@@ -2784,6 +2854,22 @@ export default function App() {
     );
   }
 
+  if (route === '/conheca-a-plataforma' || route === '/plataforma') {
+    return (
+      <PlatformPage
+        authProfile={authProfile}
+        onNavigate={navigateTo}
+        onAuth={openAuth}
+        onOpenAdmin={openAdminSection}
+        onOpenClient={openClientSection}
+        onOpenSuperAdmin={openSuperAdminSection}
+        onSignOut={signOut}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))}
+      />
+    );
+  }
+
   if (route === '/blog') {
     return (
       <BlogPage
@@ -3478,7 +3564,7 @@ function PublicTopBar({
       <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>
         Planos
       </button>
-      <button type="button" className={linkClass} onClick={() => onNavigate('/#conheca-plataforma')}>
+      <button type="button" className={linkClass} onClick={() => onNavigate('/conheca-a-plataforma')}>
         Conheça a Plataforma
       </button>
       <button type="button" className={linkClass} onClick={() => onNavigate('/blog')}>
@@ -3670,6 +3756,39 @@ function filterProperties(properties, query, city, guests) {
   });
 }
 
+const platformPageFeatures = [
+  {
+    title: 'Gestão de Reservas',
+    Icon: CalendarDays,
+    preview: 'reservations',
+    description: 'Controle reservas, confirmações e disponibilidade em tempo real.',
+  },
+  {
+    title: 'Painel do Proprietário',
+    Icon: Home,
+    preview: 'owner',
+    description: 'Gerencie imóveis, fotos, valores e calendário de forma simples.',
+  },
+  {
+    title: 'Controle Financeiro',
+    Icon: Wallet,
+    preview: 'finance',
+    description: 'Acompanhe receitas, despesas, previsões e faturamento.',
+  },
+  {
+    title: 'Licenças',
+    Icon: KeyRound,
+    preview: 'licenses',
+    description: 'Controle planos, vencimentos e quantidade de imóveis liberados.',
+  },
+  {
+    title: 'Portal do Hóspede',
+    Icon: Users,
+    preview: 'guest',
+    description: 'Área exclusiva para clientes acompanharem reservas e informações.',
+  },
+];
+
 function MarketingHome({
   authProfile,
   dataChecked,
@@ -3695,39 +3814,6 @@ function MarketingHome({
   const heroPhoto = primaryBanner
     ? { url: primaryBanner.image_url, alt: primaryBanner.title || 'Hospedex' }
     : getPrimaryPhoto(properties[0], photos) || placeholderPhoto;
-  const platformFeatures = [
-    {
-      title: 'Gestão de Reservas',
-      Icon: CalendarDays,
-      preview: 'reservations',
-      description: 'Controle reservas, confirmações e disponibilidade em tempo real.',
-    },
-    {
-      title: 'Painel do Proprietário',
-      Icon: Home,
-      preview: 'owner',
-      description: 'Gerencie imóveis, fotos, valores e calendário de forma simples.',
-    },
-    {
-      title: 'Controle Financeiro',
-      Icon: Wallet,
-      preview: 'finance',
-      description: 'Acompanhe receitas, despesas, previsões e faturamento.',
-    },
-    {
-      title: 'Gestão de Licenças',
-      Icon: KeyRound,
-      preview: 'licenses',
-      description: 'Controle planos, vencimentos e quantidade de imóveis liberados.',
-    },
-    {
-      title: 'Portal do Hóspede',
-      Icon: Users,
-      preview: 'guest',
-      description: 'Área exclusiva para clientes acompanharem reservas e informações.',
-    },
-  ];
-
   return (
     <div className="min-h-screen bg-[#f4f8ff] text-ink">
       <PublicTopBar
@@ -3779,23 +3865,6 @@ function MarketingHome({
           </div>
         </section>
 
-        <section id="conheca-plataforma" className="platform-showcase scroll-mt-24 py-16 sm:py-20">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-3xl text-center">
-              <span className="platform-kicker">Hospedex por dentro</span>
-              <h2 className="mt-3 text-3xl font-black sm:text-5xl">Conheça a Plataforma</h2>
-              <p className="mt-4 text-base font-semibold leading-7 text-ink/65 sm:text-lg">
-                Tudo o que você precisa para gerenciar suas casas de temporada em um único lugar.
-              </p>
-            </div>
-            <div className="mt-12 grid gap-8 sm:gap-10">
-              {platformFeatures.map((feature, index) => (
-                <PlatformFeatureBlock key={feature.title} feature={feature} index={index} />
-              ))}
-            </div>
-          </div>
-        </section>
-
         <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
           <div className="mb-6 flex items-end justify-between gap-3">
             <div>
@@ -3815,6 +3884,51 @@ function MarketingHome({
           ) : (
             <EmptyState title="Nenhuma casa encontrada" text="Ajuste a busca ou cadastre a primeira hospedagem no painel." />
           )}
+        </section>
+      </main>
+      <SiteFooter onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function PlatformPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, onOpenSuperAdmin, onSignOut, themeMode, onToggleTheme }) {
+  return (
+    <div className="min-h-screen bg-[#f4f8ff] text-ink">
+      <PublicTopBar
+        authProfile={authProfile}
+        onNavigate={onNavigate}
+        onAuth={onAuth}
+        onOpenAdmin={onOpenAdmin}
+        onOpenClient={onOpenClient}
+        onOpenSuperAdmin={onOpenSuperAdmin}
+        onSignOut={onSignOut}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
+      />
+      <main>
+        <section className="platform-showcase py-16 sm:py-20">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-3xl text-center">
+              <span className="platform-kicker">Hospedex por dentro</span>
+              <h1 className="mt-3 text-4xl font-black sm:text-6xl">Conheça a Plataforma</h1>
+              <p className="mt-4 text-base font-semibold leading-7 text-ink/65 sm:text-xl sm:leading-8">
+                Tudo o que você precisa para gerenciar suas casas de temporada em um único lugar.
+              </p>
+            </div>
+            <div className="mt-12 grid gap-8 sm:gap-10">
+              {platformPageFeatures.map((feature, index) => (
+                <PlatformFeatureBlock key={feature.title} feature={feature} index={index} />
+              ))}
+            </div>
+            <div className="mt-12 flex flex-wrap justify-center gap-3">
+              <Button type="button" onClick={() => onNavigate('/planos')}>
+                Ver planos
+              </Button>
+              <Button type="button" variant="outline" onClick={() => onNavigate('/casas')}>
+                Ver hospedagens
+              </Button>
+            </div>
+          </div>
         </section>
       </main>
       <SiteFooter onNavigate={onNavigate} />
@@ -4194,7 +4308,7 @@ function BlogPage({ authProfile, onNavigate, onAuth, onOpenAdmin, onOpenClient, 
             ))}
           </div>
           <div>
-            <Button type="button" onClick={() => onNavigate('/#conheca-plataforma')}>
+            <Button type="button" onClick={() => onNavigate('/conheca-a-plataforma')}>
               Conhecer a plataforma
             </Button>
           </div>
@@ -4362,6 +4476,7 @@ function SuperAdminDashboard({
   const [platformFinanceDraft, setPlatformFinanceDraft] = useState(() => createEmptyPlatformMovementDraft('income'));
   const [userNotice, setUserNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [licenseDraft, setLicenseDraft] = useState(createEmptyLicenseDraft);
   const [bannerDraft, setBannerDraft] = useState({
     title: '',
@@ -4387,6 +4502,7 @@ function SuperAdminDashboard({
     const normalizedView = normalizeSuperAdminView(nextView);
     setView(normalizedView);
     writeLocalData(uiStateKeys.superAdminView, normalizedView);
+    setMobileMenuOpen(false);
   }
 
   const owners = profiles.filter((profile) => normalizeRole(profile.role) === 'proprietario');
@@ -4435,6 +4551,7 @@ function SuperAdminDashboard({
     ['banners', 'Banners/Home', 'image'],
     ['settings', 'Configurações', 'settings'],
   ];
+  const activeMenuLabel = menu.find(([key]) => key === view)?.[1] || 'Dashboard';
 
   function syncPropertyLicense(savedLicense) {
     if (!savedLicense?.property_id) return;
@@ -4886,8 +5003,19 @@ function SuperAdminDashboard({
 
   return (
     <div className="min-h-screen bg-[#eef4ff] text-ink">
+      <MobilePanelDrawer
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        title="Super Admin"
+        subtitle={authProfile?.email}
+        menu={menu}
+        activeKey={view}
+        onChange={changeView}
+        onHome={onHome}
+        onSignOut={onSignOut}
+      />
       <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
-        <aside className="border-b border-ink/10 bg-white p-3 sm:p-4 lg:border-b-0 lg:border-r">
+        <aside className="hidden border-b border-ink/10 bg-white p-3 sm:p-4 lg:block lg:border-b-0 lg:border-r">
           <div className="flex items-center gap-3 rounded-md bg-ink p-3 text-white sm:p-4">
             <ShieldCheck size={24} className="sm:h-7 sm:w-7" />
             <div>
@@ -4919,13 +5047,20 @@ function SuperAdminDashboard({
             </Button>
           </div>
         </aside>
-        <main className="overflow-auto p-3 sm:p-6">
-          <header className="mb-4 flex flex-col gap-3 rounded-md bg-white p-3 shadow-sm sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-            <div>
+        <main className="panel-mobile-flow min-w-0 overflow-auto p-3 sm:p-5 lg:p-6">
+          <header className="mb-4 grid gap-3 rounded-md bg-white p-3 shadow-sm sm:mb-6 sm:p-4 lg:flex lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-[#f4f8ff] lg:hidden" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
+                <Menu size={20} />
+              </button>
+              <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm lg:hidden" />
+              <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wide text-ink/50">HospedeX</p>
-              <h1 className="text-xl font-black sm:text-2xl">Gestão total do sistema</h1>
+              <h1 className="truncate text-xl font-black sm:text-2xl">{view === 'dashboard' ? 'Gestão total do sistema' : activeMenuLabel}</h1>
+                <p className="truncate text-xs font-semibold text-ink/55 lg:hidden">{authProfile?.email}</p>
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[auto_minmax(220px,320px)]">
+            <div className="grid gap-2 sm:grid-cols-[auto_minmax(220px,320px)] lg:min-w-[420px]">
               <Button type="button" variant="outline" onClick={refreshDashboardData} disabled={refreshing} className="min-h-11 px-4">
                 <RefreshCw size={18} />
                 {refreshing ? 'Atualizando' : 'Atualizar'}
@@ -4936,7 +5071,7 @@ function SuperAdminDashboard({
 
           {view === 'dashboard' ? (
             <div className="grid gap-5">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
                 <SuperStat icon="manage_accounts" label="Proprietários" value={stats.owners} />
                 <SuperStat icon="group" label="Hóspedes" value={stats.guests} />
                 <SuperStat icon="home_work" label="Imóveis" value={stats.properties} />
@@ -5759,7 +5894,28 @@ function SuperTable({ title, rows, columns }) {
       <div className="border-b border-ink/10 p-4">
         <h2 className="text-xl font-black">{title}</h2>
       </div>
-      <div className="overflow-auto">
+      <div className="grid gap-3 p-3 md:hidden">
+        {rows.length ? (
+          rows.map((row, index) => (
+            <article key={row.id || `${title}-${index}`} className="rounded-md border border-ink/10 bg-[#f8fbff] p-3">
+              <p className="mb-3 text-sm font-black">{title} #{index + 1}</p>
+              <div className="grid gap-2 text-sm">
+                {columns.map((column) => (
+                  <div key={column} className="grid gap-1 rounded-md bg-white p-2">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-ink/45">{column}</span>
+                    <span className="break-words font-semibold text-ink/75">
+                      {column === 'role' ? roleLabels[normalizeRole(row[column])] || row[column] : String(row[column] ?? '-')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))
+        ) : (
+          <p className="rounded-md bg-[#f8fbff] p-4 text-center text-sm font-semibold text-ink/60">Nenhum registro encontrado.</p>
+        )}
+      </div>
+      <div className="hidden overflow-auto md:block">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-mist text-xs uppercase tracking-wide text-ink/55">
             <tr>
@@ -6237,6 +6393,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   const pendingReservations = clientReservations.filter((reservation) => reservation.status === 'pending');
   const confirmedReservations = clientReservations.filter((reservation) => reservation.status === 'confirmed');
   const cancelledReservations = clientReservations.filter((reservation) => reservation.status === 'cancelled');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menu = [
     ['dashboard', 'Dashboard', 'dashboard'],
     ['reservations', 'Minhas reservas', 'calendar_month'],
@@ -6255,6 +6412,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   function changeView(nextView) {
     setView(nextView);
     writeLocalData(uiStateKeys.clientPortalView, nextView);
+    setMobileMenuOpen(false);
   }
 
   async function submitProfile(event) {
@@ -6288,9 +6446,35 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-ink/60 p-1.5 backdrop-blur sm:p-3">
-      <div className="mx-auto grid h-[calc(100dvh-0.75rem)] max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-1.5rem)] lg:grid-cols-[260px_1fr] lg:grid-rows-none">
-        <aside className="border-b border-ink/10 bg-white p-3 sm:p-4 lg:border-b-0 lg:border-r">
+    <div className="fixed inset-0 z-50 bg-ink/60 p-0 backdrop-blur sm:p-3">
+      <MobilePanelDrawer
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        title="Portal do cliente"
+        subtitle={authProfile?.email}
+        menu={menu}
+        activeKey={view}
+        onChange={changeView}
+        onHome={onClose}
+        onSignOut={onSignOut}
+        homeLabel="Fechar"
+      />
+      <div className="mx-auto grid h-dvh max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-1.5rem)] sm:rounded-md lg:grid-cols-[260px_1fr] lg:grid-rows-none">
+        <header className="flex items-center gap-3 border-b border-ink/10 bg-white p-3 lg:hidden">
+          <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-[#f4f8ff]" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
+            <Menu size={20} />
+          </button>
+          <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Portal</p>
+            <h2 className="truncate text-lg font-black">{menu.find(([key]) => key === view)?.[1] || 'Dashboard'}</h2>
+            <p className="truncate text-xs font-semibold text-ink/55">{authProfile?.email}</p>
+          </div>
+          <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-white" onClick={onClose} aria-label="Fechar portal">
+            <X size={18} />
+          </button>
+        </header>
+        <aside className="hidden border-b border-ink/10 bg-white p-3 sm:p-4 lg:block lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-3 lg:block">
             <div>
               <h2 className="text-xl font-black">Portal do cliente</h2>
@@ -6320,7 +6504,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
             Sair
           </Button>
         </aside>
-        <main className="min-h-0 overflow-auto p-3 sm:p-5">
+        <main className="panel-mobile-flow min-h-0 overflow-auto p-3 sm:p-5">
           <div className="hidden justify-end lg:flex">
             <Button type="button" variant="outline" onClick={onClose}>
               <X size={18} />
@@ -6330,7 +6514,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
           {view === 'dashboard' ? (
             <div className="grid gap-5">
               <h3 className="text-2xl font-black">Dashboard</h3>
-              <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <PortalCard label="Reservas" value={clientReservations.length} icon="calendar_month" />
                 <PortalCard label="Pendentes" value={pendingReservations.length} icon="pending_actions" />
                 <PortalCard label="Aceitas" value={confirmedReservations.length} icon="verified_user" />
@@ -6363,7 +6547,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                   Acompanhe as reservas que você solicitou, as pendentes e as aceitas pelo administrador.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <PortalCard label="Pendentes" value={pendingReservations.length} icon="pending_actions" />
                 <PortalCard label="Aceitas" value={confirmedReservations.length} icon="verified_user" />
                 <PortalCard label="Canceladas" value={cancelledReservations.length} icon="cancel" />
@@ -6793,6 +6977,7 @@ function AdminPanel({
   const [showNewProperty, setShowNewProperty] = useState(() => readLocalData(ownerPropertyDraftOpenKey, false));
   const [reportType, setReportType] = useState('summary');
   const [adminView, setAdminView] = useState(() => readLocalData(uiStateKeys.adminView, initialView || 'dashboard'));
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [adminNotice, setAdminNotice] = useState('');
   const [reservationToast, setReservationToast] = useState(null);
   const [confirmingReservationId, setConfirmingReservationId] = useState('');
@@ -6883,6 +7068,7 @@ function AdminPanel({
     ['admin', 'Dados do administrador', 'person'],
     ['settings', 'Configurações', 'settings'],
   ];
+  const activeAdminMenuLabel = adminMenu.find(([key]) => key === adminView)?.[1] || 'Dashboard';
   const reportLabels = {
     summary: 'Resumo gerencial',
     reservations: 'Reservas',
@@ -6917,6 +7103,7 @@ function AdminPanel({
   function changeAdminView(nextView) {
     setAdminView(nextView);
     writeLocalData(uiStateKeys.adminView, nextView);
+    setMobileMenuOpen(false);
   }
 
   function showReservationToast(message, type = 'success') {
@@ -7639,8 +7826,8 @@ function AdminPanel({
 
   if (ownerPanelBlocked) {
     return (
-      <div className="fixed inset-0 z-40 bg-ink/55 p-1.5 backdrop-blur-sm sm:p-3">
-        <div className="ml-auto h-[calc(100dvh-0.75rem)] max-w-3xl overflow-auto rounded-md bg-[#f4f8ff] shadow-soft sm:h-[calc(100dvh-1.5rem)]">
+      <div className="fixed inset-0 z-40 bg-ink/55 p-0 backdrop-blur-sm sm:p-3">
+        <div className="ml-auto h-dvh max-w-3xl overflow-auto rounded-none bg-[#f4f8ff] shadow-soft sm:h-[calc(100dvh-1.5rem)] sm:rounded-md">
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
             <div>
               <h2 className="text-lg font-black sm:text-2xl">Administração</h2>
@@ -7676,7 +7863,7 @@ function AdminPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-40 bg-ink/55 p-1.5 backdrop-blur-sm sm:p-4">
+    <div className="fixed inset-0 z-40 bg-ink/55 p-0 backdrop-blur-sm sm:p-4">
       {reservationToast ? (
         <div
           className={`fixed bottom-4 left-3 right-3 z-[80] mx-auto flex max-w-md items-center gap-3 rounded-md px-4 py-3 text-sm font-black shadow-soft transition-all duration-300 sm:left-auto sm:right-5 ${
@@ -7691,11 +7878,29 @@ function AdminPanel({
           <span>{reservationToast.message}</span>
         </div>
       ) : null}
-      <div className="ml-auto flex h-[calc(100dvh-0.75rem)] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-2rem)]">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
-          <div>
-            <h2 className="text-lg font-black sm:text-2xl">Administração</h2>
-            <p className="hidden text-sm text-white/75 sm:block">Atualize valores, fotos e reservas.</p>
+      <MobilePanelDrawer
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        title="Painel proprietário"
+        subtitle={adminDetails.email || authProfile?.email || adminEmail}
+        menu={adminMenu}
+        activeKey={adminView}
+        onChange={changeAdminView}
+        onHome={onClose}
+        onSignOut={onSignOut}
+        homeLabel="Fechar"
+      />
+      <div className="ml-auto flex h-dvh w-full max-w-6xl flex-col overflow-hidden rounded-none bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-2rem)] sm:rounded-md">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-white/10 lg:hidden" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
+              <Menu size={20} />
+            </button>
+            <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm lg:hidden" />
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-black sm:text-2xl">{activeAdminMenuLabel}</h2>
+              <p className="truncate text-xs text-white/75 sm:text-sm">{adminDetails.email || authProfile?.email || adminEmail}</p>
+            </div>
           </div>
           <Button variant="outline" onClick={onClose} aria-label="Fechar painel">
             <X size={18} />
@@ -7814,8 +8019,8 @@ function AdminPanel({
             </p>
           </form>
         ) : (
-          <div className="grid min-h-0 flex-1 gap-3 overflow-auto p-3 sm:gap-5 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start lg:p-5">
-            <aside className="h-fit rounded-md bg-white p-3 shadow-sm lg:sticky lg:top-0">
+          <div className="panel-mobile-flow grid min-h-0 flex-1 gap-3 overflow-auto p-3 sm:gap-5 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start lg:p-5">
+            <aside className="hidden h-fit rounded-md bg-white p-3 shadow-sm lg:sticky lg:top-0 lg:block">
               <div className="mb-3 rounded-md bg-[#f4f8ff] p-3">
                 <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Painel</p>
                 <p className="mt-1 text-sm font-black">{adminDetails.full_name || authProfile?.full_name || 'Administrador'}</p>
@@ -7887,7 +8092,7 @@ function AdminPanel({
                   <h3 className="text-xl font-black">Dashboard</h3>
                   <p className="mt-1 text-sm text-ink/65">Visão geral operacional da casa selecionada.</p>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                   <FinanceCard icon="home_work" label="Casas" value={properties.length} />
                   <FinanceCard icon="event_available" label="Reservas ativas" value={visibleReservations.length} />
                   <FinanceCard icon="pending_actions" label="Pendentes" value={pendingReservations.length} />

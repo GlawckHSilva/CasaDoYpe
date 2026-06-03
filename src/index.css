@@ -1083,6 +1083,32 @@ textarea:focus-visible {
   }
 }
 
+@media (max-width: 768px) {
+  .panel-mobile-flow form .sm\:grid-cols-2,
+  .panel-mobile-flow form .sm\:grid-cols-3,
+  .panel-mobile-flow form .sm\:grid-cols-4,
+  .panel-mobile-flow form .md\:grid-cols-2,
+  .panel-mobile-flow form .md\:grid-cols-3,
+  .panel-mobile-flow form .md\:grid-cols-4,
+  .panel-mobile-flow form .lg\:grid-cols-2,
+  .panel-mobile-flow form .lg\:grid-cols-3,
+  .panel-mobile-flow form .xl\:grid-cols-2,
+  .panel-mobile-flow form .xl\:grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .panel-mobile-flow form .sm\:flex-row {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .panel-mobile-flow form .sm\:items-center,
+  .panel-mobile-flow form .md\:items-center,
+  .panel-mobile-flow form .lg\:items-center {
+    align-items: stretch !important;
+  }
+}
+
 @media (min-width: 768px) {
   .search-shell {
     grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.8fr) minmax(140px, 0.55fr) auto;
