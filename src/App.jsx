@@ -1685,6 +1685,19 @@ export default function App() {
     routerNavigate(path, { replace: Boolean(options.replace) });
   }
 
+  useEffect(() => {
+    if (!location.hash || typeof window === 'undefined') return undefined;
+    const sectionId = decodeURIComponent(location.hash.replace(/^#/, ''));
+    const timer = window.setTimeout(() => scrollToSection(sectionId), 80);
+    return () => window.clearTimeout(timer);
+  }, [location.hash, route]);
+
+  useEffect(() => {
+    if (route === '/sobre') {
+      navigateTo('/#conheca-plataforma', { replace: true });
+    }
+  }, [route]);
+
   function openAuth(mode = 'login') {
     setAuthInitialMode(mode);
     navigateTo(mode === 'signup' ? '/login?mode=signup' : '/login');
@@ -3396,7 +3409,7 @@ function PublicTopBar({
   onToggleTheme,
 }) {
   const role = normalizeRole(authProfile?.role);
-  const linkClass = 'header-link inline-flex items-center gap-2';
+  const linkClass = 'header-link inline-flex items-center gap-2 whitespace-nowrap';
   const menuItems =
     role === 'super_admin'
       ? [
@@ -3444,18 +3457,15 @@ function PublicTopBar({
     </button>
   );
   const navigation = (
-    <nav className="hidden items-center gap-8 text-sm font-black lg:flex">
+    <nav className="hidden items-center gap-6 text-sm font-black lg:flex xl:gap-8">
       <button type="button" className={linkClass} onClick={() => onNavigate('/casas')}>
-        Recursos
+        Hospedagens
       </button>
       <button type="button" className={linkClass} onClick={() => onNavigate('/planos')}>
         Planos
       </button>
-      <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
-        Sobre
-      </button>
-      <button type="button" className={linkClass} onClick={() => onNavigate('/sobre')}>
-        Blog
+      <button type="button" className={linkClass} onClick={() => onNavigate('/#conheca-plataforma')}>
+        Conheça a Plataforma
       </button>
       <a className={linkClass} href={socialLinks.email} target="_blank" rel="noreferrer">
         Contato
@@ -3665,13 +3675,37 @@ function MarketingHome({
   const heroPhoto = primaryBanner
     ? { url: primaryBanner.image_url, alt: primaryBanner.title || 'Hospedex' }
     : getPrimaryPhoto(properties[0], photos) || placeholderPhoto;
-  const mockups = [
-    ['Tela hóspede', User, 'Busca, calendário e solicitação de reserva'],
-    ['Tela proprietário', Home, 'Casas, fotos, reservas e caixa'],
-    ['Tela admin', ShieldCheck, 'Proprietários, hóspedes e licenças'],
-    ['Reservas', CalendarDays, 'Status, pagamentos e hóspedes'],
-    ['Calendário', ClipboardList, 'Bloqueios e disponibilidade'],
-    ['Financeiro', Wallet, 'Receitas, despesas e previsões'],
+  const platformFeatures = [
+    {
+      title: 'Gestão de Reservas',
+      Icon: CalendarDays,
+      preview: 'reservations',
+      description: 'Controle reservas, confirmações e disponibilidade em tempo real.',
+    },
+    {
+      title: 'Painel do Proprietário',
+      Icon: Home,
+      preview: 'owner',
+      description: 'Gerencie imóveis, fotos, valores e calendário de forma simples.',
+    },
+    {
+      title: 'Controle Financeiro',
+      Icon: Wallet,
+      preview: 'finance',
+      description: 'Acompanhe receitas, despesas, previsões e faturamento.',
+    },
+    {
+      title: 'Gestão de Licenças',
+      Icon: KeyRound,
+      preview: 'licenses',
+      description: 'Controle planos, vencimentos e quantidade de imóveis liberados.',
+    },
+    {
+      title: 'Portal do Hóspede',
+      Icon: Users,
+      preview: 'guest',
+      description: 'Área exclusiva para clientes acompanharem reservas e informações.',
+    },
   ];
 
   return (
@@ -3725,23 +3759,18 @@ function MarketingHome({
           </div>
         </section>
 
-        <section className="bg-white py-14">
+        <section id="conheca-plataforma" className="platform-showcase scroll-mt-24 py-16 sm:py-20">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <h2 className="text-3xl font-black">Previews da plataforma</h2>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {mockups.map(([title, Icon, text]) => (
-                <div key={title} className="rounded-md bg-[#f4f8ff] p-4 shadow-sm ring-1 ring-ink/10">
-                  <div className="flex items-center justify-between">
-                    <strong>{title}</strong>
-                    <Icon size={20} className="text-leaf" />
-                  </div>
-                  <div className="mt-4 grid gap-2">
-                    <span className="h-3 w-2/3 rounded-full bg-ink/15" />
-                    <span className="h-3 w-full rounded-full bg-ink/10" />
-                    <span className="h-20 rounded-md bg-white shadow-sm" />
-                  </div>
-                  <p className="mt-3 text-sm font-semibold text-ink/60">{text}</p>
-                </div>
+            <div className="mx-auto max-w-3xl text-center">
+              <span className="platform-kicker">Hospedex por dentro</span>
+              <h2 className="mt-3 text-3xl font-black sm:text-5xl">Conheça a Plataforma</h2>
+              <p className="mt-4 text-base font-semibold leading-7 text-ink/65 sm:text-lg">
+                Tudo o que você precisa para gerenciar suas casas de temporada em um único lugar.
+              </p>
+            </div>
+            <div className="mt-12 grid gap-8 sm:gap-10">
+              {platformFeatures.map((feature, index) => (
+                <PlatformFeatureBlock key={feature.title} feature={feature} index={index} />
               ))}
             </div>
           </div>
@@ -3769,6 +3798,201 @@ function MarketingHome({
         </section>
       </main>
       <SiteFooter onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+const platformPreviewConfigs = {
+  reservations: {
+    eyebrow: 'Reservas',
+    title: 'Agenda de disponibilidade',
+    metrics: [
+      ['18', 'Confirmadas'],
+      ['4', 'Pendentes'],
+      ['92%', 'Ocupação'],
+    ],
+    rows: ['Casa Azul · 12 a 16 jun', 'Casa Ypê · aguardando confirmação', 'Vista Mar · pagamento recebido'],
+  },
+  owner: {
+    eyebrow: 'Proprietário',
+    title: 'Casa na praia',
+    metrics: [
+      ['3', 'Imóveis'],
+      ['42', 'Fotos'],
+      ['R$ 480', 'Diária média'],
+    ],
+    rows: ['Galeria organizada', 'Calendário sincronizado', 'Link público copiado'],
+  },
+  finance: {
+    eyebrow: 'Financeiro',
+    title: 'Caixa do mês',
+    metrics: [
+      ['R$ 8,4k', 'Recebido'],
+      ['R$ 2,1k', 'Gasto'],
+      ['R$ 6,3k', 'Total'],
+    ],
+    rows: ['Pix recebido · João Silva', 'Despesa · Limpeza', 'A receber · Reserva julho'],
+  },
+  licenses: {
+    eyebrow: 'Licenças',
+    title: 'Planos e limites',
+    metrics: [
+      ['12', 'Ativas'],
+      ['3', 'A vencer'],
+      ['2', 'Casas/plano'],
+    ],
+    rows: ['Plano mensal · ativo', 'Renovação semestral · a receber', 'Limite de imóveis preservado'],
+  },
+  guest: {
+    eyebrow: 'Hóspede',
+    title: 'Portal do cliente',
+    metrics: [
+      ['2', 'Reservas'],
+      ['1', 'Suporte'],
+      ['24h', 'Atualizado'],
+    ],
+    rows: ['Reserva confirmada', 'Voucher disponível', 'Informações da estadia'],
+  },
+};
+
+const platformFeatureBullets = {
+  reservations: ['Status em tempo real', 'Calendário integrado', 'Confirmação rápida'],
+  owner: ['Imóveis e fotos', 'Valores por diária', 'Links públicos'],
+  finance: ['Receitas e despesas', 'A receber e a pagar', 'Resultado líquido'],
+  licenses: ['Planos ativos', 'Vencimentos', 'Limite de casas'],
+  guest: ['Reservas do cliente', 'Suporte centralizado', 'Dados da estadia'],
+};
+
+function PlatformFeatureBlock({ feature, index }) {
+  const Icon = feature.Icon;
+  const alternate = index % 2 === 1;
+  const bullets = platformFeatureBullets[feature.preview] || [];
+
+  return (
+    <article className="platform-feature grid gap-6 p-4 sm:p-5 lg:grid-cols-2 lg:gap-8 lg:p-6">
+      <div className={`platform-feature-media ${alternate ? 'lg:order-2' : ''}`}>
+        <PlatformFeaturePreview feature={feature} />
+      </div>
+      <div className={`platform-feature-copy grid content-center gap-4 ${alternate ? 'lg:order-1' : ''}`}>
+        <span className="platform-feature-icon">
+          <Icon size={22} aria-hidden="true" />
+        </span>
+        <div>
+          <h3 className="text-2xl font-black sm:text-3xl">{feature.title}</h3>
+          <p className="mt-3 max-w-xl text-sm font-semibold leading-6 text-ink/65 sm:text-base">
+            {feature.description}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {bullets.map((bullet) => (
+            <span key={bullet} className="platform-feature-pill">
+              <Check size={15} aria-hidden="true" />
+              {bullet}
+            </span>
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function PlatformFeaturePreview({ feature }) {
+  const config = platformPreviewConfigs[feature.preview] || platformPreviewConfigs.reservations;
+  return (
+    <div className="platform-preview-frame" aria-label={`Preview de ${feature.title}`}>
+      <div className="platform-preview-toolbar">
+        <span className="platform-preview-dot" />
+        <span className="platform-preview-dot" />
+        <span className="platform-preview-dot" />
+        <strong>{config.eyebrow}</strong>
+      </div>
+      <div className="platform-preview-screen">
+        <div className="platform-preview-heading">
+          <div>
+            <span>{config.eyebrow}</span>
+            <h4>{config.title}</h4>
+          </div>
+          <span className="platform-preview-badge">Hospedex</span>
+        </div>
+        <div className="platform-preview-metrics">
+          {config.metrics.map(([value, label]) => (
+            <div key={label} className="platform-preview-metric">
+              <strong>{value}</strong>
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+        <PlatformPreviewVisual type={feature.preview} />
+        <div className="platform-preview-list">
+          {config.rows.map((row) => (
+            <div key={row} className="platform-preview-row">
+              <span />
+              <p>{row}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlatformPreviewVisual({ type }) {
+  if (type === 'finance') {
+    return (
+      <div className="platform-preview-chart" aria-hidden="true">
+        {[44, 68, 38, 82, 56, 92].map((height, index) => (
+          <span key={height + index} style={{ height: `${height}%` }} />
+        ))}
+      </div>
+    );
+  }
+
+  if (type === 'owner') {
+    return (
+      <div className="platform-preview-property" aria-hidden="true">
+        <div className="platform-preview-photo">
+          <Home size={24} />
+        </div>
+        <div className="platform-preview-controls">
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    );
+  }
+
+  if (type === 'licenses') {
+    return (
+      <div className="platform-preview-license-grid" aria-hidden="true">
+        {['Mensal', 'Semestral', 'Anual'].map((plan, index) => (
+          <span key={plan} className={index === 0 ? 'is-active' : ''}>
+            {plan}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  if (type === 'guest') {
+    return (
+      <div className="platform-preview-guest-card" aria-hidden="true">
+        <span className="platform-preview-avatar" />
+        <div>
+          <strong>Reserva confirmada</strong>
+          <p>Check-in, suporte e detalhes da estadia.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="platform-preview-calendar" aria-hidden="true">
+      {['Livre', 'Livre', 'Ocupado', 'Pago', 'Livre', 'Pendente', 'Livre'].map((day, index) => (
+        <span key={day + index} className={day === 'Livre' ? '' : 'is-busy'}>
+          {day}
+        </span>
+      ))}
     </div>
   );
 }
