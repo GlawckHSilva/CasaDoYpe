@@ -23,7 +23,7 @@ export default function UserMenu({
     ...(showSupport ? [['Suporte', onOpenSupport, Headset]] : []),
     ['Configurações', onOpenSettings, Settings],
     ['Alternar tema', onToggleTheme, ThemeIcon],
-  ];
+  ].filter(([, action]) => Boolean(action));
 
   const runAction = (action) => {
     action?.();
@@ -61,7 +61,7 @@ export default function UserMenu({
               className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-mist dark:hover:bg-white/5"
               onClick={() => runAction(action)}
             >
-              <Icon size={17} className="text-leaf dark:text-blue-300" />
+              <Icon size={17} className="text-sky-600 dark:text-sky-300" />
               <span>{label}</span>
               {label === 'Notificações' && pendingNotifications > 0 ? (
                 <span className="ml-auto rounded-full bg-red-600 px-2 py-0.5 text-xs font-black text-white">

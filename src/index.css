@@ -102,7 +102,7 @@ textarea {
 }
 
 .btn-primary-theme {
-  background: linear-gradient(135deg, var(--property-accent, var(--primary)), #087f8c);
+  background: linear-gradient(135deg, var(--property-accent, var(--primary)), #0891b2);
   color: #fff;
   box-shadow: 0 12px 24px color-mix(in srgb, var(--property-accent, var(--primary)) 24%, transparent);
 }
@@ -113,9 +113,9 @@ textarea {
 }
 
 .btn-secondary-theme {
-  background: linear-gradient(135deg, #102033, #0a66c2);
+  background: linear-gradient(135deg, #07549f, #0891b2);
   color: #fff;
-  box-shadow: 0 12px 24px rgba(16, 32, 51, 0.22);
+  box-shadow: 0 12px 24px rgba(10, 102, 194, 0.22);
 }
 
 .btn-outline-theme {
@@ -338,7 +338,7 @@ textarea {
   justify-content: center;
   gap: 0.55rem;
   border-radius: 0.7rem;
-  background: linear-gradient(135deg, #0a66c2, #075ff0);
+  background: linear-gradient(135deg, #0a66c2, #0891b2);
   color: #fff;
   font-size: 0.82rem;
   font-weight: 900;
@@ -358,7 +358,7 @@ textarea {
 
 .dark .header-primary-action,
 .site-header--transparent .header-primary-action {
-  background: linear-gradient(135deg, #0a66c2, #0b7cff);
+  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
   box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.2), 0 18px 38px rgba(37, 99, 235, 0.36);
 }
 
@@ -882,7 +882,7 @@ textarea:focus,
   min-height: 3.85rem;
   border-radius: 0.625rem;
   border: 0;
-  background: linear-gradient(135deg, var(--property-accent, var(--primary)), #087f8c);
+  background: linear-gradient(135deg, var(--property-accent, var(--primary)), #0891b2);
   color: #fff;
   font-weight: 900;
   box-shadow: 0 16px 32px color-mix(in srgb, var(--property-accent, var(--primary)) 24%, transparent);
@@ -1080,6 +1080,35 @@ textarea:focus-visible {
 
   .calendar-cell {
     min-height: 76px;
+  }
+
+  .panel-mobile-flow,
+  .panel-mobile-flow > *,
+  .panel-mobile-flow section,
+  .panel-mobile-flow article,
+  .panel-mobile-flow form,
+  .panel-mobile-flow div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .panel-mobile-flow h1,
+  .panel-mobile-flow h2,
+  .panel-mobile-flow h3,
+  .panel-mobile-flow h4,
+  .panel-mobile-flow h5,
+  .panel-mobile-flow p,
+  .panel-mobile-flow span,
+  .panel-mobile-flow strong,
+  .panel-mobile-flow label {
+    overflow-wrap: anywhere;
+  }
+
+  .panel-mobile-flow button,
+  .panel-mobile-flow input,
+  .panel-mobile-flow select,
+  .panel-mobile-flow textarea {
+    max-width: 100%;
   }
 }
 

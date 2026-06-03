@@ -423,6 +423,27 @@ const placeholderPhoto = {
   alt: 'Sem foto cadastrada',
 };
 
+function isTechnicalPhotoTitle(value) {
+  const title = String(value || '').trim();
+  if (!title) return true;
+  const lower = title.toLowerCase();
+  return (
+    /^chatgpt[_\s-]*image/.test(lower) ||
+    /^(img|image|dsc|pxl|screenshot|whatsapp[_\s-]*image)[_\s-]?\d/.test(lower) ||
+    /\.(jpe?g|png|webp|gif|heic)$/i.test(title) ||
+    (title.length > 32 && /[_-]/.test(title) && /\d/.test(title))
+  );
+}
+
+function getGeneratedPhotoTitle(index) {
+  return `Foto ${Math.max(1, Number(index || 1))}`;
+}
+
+function getPhotoDisplayTitle(photo, index = 0) {
+  const title = String(photo?.alt || photo?.title || '').trim();
+  return title && !isTechnicalPhotoTitle(title) ? title : getGeneratedPhotoTitle(index + 1);
+}
+
 function PropertyPhotoImage({
   src,
   alt = 'Foto da casa',
@@ -492,7 +513,7 @@ function messageStatusLabel(status) {
 }
 
 function isUnreadMessage(item) {
-  return normalizeMessageStatus(item?.status) === 'new';
+  return !item?.read_at && normalizeMessageStatus(item?.status) === 'new';
 }
 
 function formatTableValue(column, value) {
@@ -1043,7 +1064,7 @@ function normalizeInstallmentRates(rates = [], maxInstallments = 4, fallbackRate
 function getPropertyInstallmentRates(paymentSettings, fallbackRates = defaultInterestRates) {
   const fallback = parseInterestRates(fallbackRates);
   const maxInstallments = clampInstallmentLimit(paymentSettings?.max_installments, fallback.length || 1);
-  return normalizeInstallmentRates(paymentSettings?.interest_rates, maxInstallments, fallback);
+  return normalizeInstallmentRates([], maxInstallments, fallback);
 }
 
 function getReservationNights(reservation) {
@@ -1376,8 +1397,16 @@ function PanelIcon({ icon, className = '', size = 18 }) {
   return <MaterialIcon name={String(icon || '')} className={className} size={size} />;
 }
 
-function BrandLogo({ variant = 'horizontal', className = 'h-10 w-auto', alt = 'Hospedex' }) {
-  return <img className={`aspect-square object-contain ${className}`} src={brandAssets[variant] || brandAssets.horizontal} alt={alt} />;
+function BrandLogo({ variant = 'horizontal', className = 'h-10 w-auto', alt = 'Hospedex', loading = 'lazy' }) {
+  return (
+    <img
+      className={`aspect-square object-contain ${className}`}
+      src={brandAssets[variant] || brandAssets.horizontal}
+      alt={alt}
+      loading={loading}
+      decoding="async"
+    />
+  );
 }
 
 function LoadingScreen({ label = 'Carregando Hospedex...' }) {
@@ -1386,7 +1415,7 @@ function LoadingScreen({ label = 'Carregando Hospedex...' }) {
       <div className="grid justify-items-center gap-4 text-center">
         <BrandLogo variant="vertical" className="h-40 w-40 rounded-2xl shadow-soft" />
         <div className="h-1.5 w-44 overflow-hidden rounded-full bg-blue-100">
-          <span className="block h-full w-1/2 animate-pulse rounded-full bg-leaf" />
+          <span className="block h-full w-1/2 animate-pulse rounded-full bg-sky-500" />
         </div>
         <p className="text-sm font-bold text-ink/60">{label}</p>
       </div>
@@ -1405,7 +1434,7 @@ function Button({ children, className = '', variant = 'primary', ...props }) {
 
   return (
     <button
-      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-[13px] font-bold transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60 sm:min-h-11 sm:px-5 sm:py-2.5 sm:text-sm ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-10 max-w-full min-w-0 items-center justify-center gap-2 rounded-md px-4 py-2 text-center text-[13px] font-bold leading-tight transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60 sm:min-h-11 sm:px-5 sm:py-2.5 sm:text-sm ${variants[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -1444,7 +1473,7 @@ function MobilePanelDrawer({
               key={key}
               type="button"
               className={`flex min-h-11 items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-black transition ${
-                activeKey === key ? 'bg-leaf text-white' : 'hover:bg-mist dark:hover:bg-white/5'
+                  activeKey === key ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20' : 'hover:bg-mist dark:hover:bg-white/5'
               }`}
               onClick={() => {
                 onChange?.(key);
@@ -1486,7 +1515,7 @@ function Field({ label, children }) {
 function TextInput({ className = '', ...props }) {
   return (
     <input
-      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 dark:border-white/10 dark:bg-slate-950/80 dark:text-white dark:placeholder:text-white/40 sm:min-h-11 sm:text-sm ${className}`}
+      className={`form-control min-h-10 w-full rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 dark:border-white/10 dark:bg-slate-950/80 dark:text-white dark:placeholder:text-white/40 sm:min-h-11 sm:text-sm ${className}`}
       {...props}
     />
   );
@@ -1495,7 +1524,7 @@ function TextInput({ className = '', ...props }) {
 function TextArea({ className = '', ...props }) {
   return (
     <textarea
-      className={`form-control min-h-20 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 dark:border-white/10 dark:bg-slate-950/80 dark:text-white dark:placeholder:text-white/40 sm:min-h-24 sm:text-sm ${className}`}
+      className={`form-control min-h-20 w-full rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 dark:border-white/10 dark:bg-slate-950/80 dark:text-white dark:placeholder:text-white/40 sm:min-h-24 sm:text-sm ${className}`}
       {...props}
     />
   );
@@ -1504,7 +1533,7 @@ function TextArea({ className = '', ...props }) {
 function SelectInput({ children, className = '', ...props }) {
   return (
     <select
-      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition dark:border-white/10 dark:bg-slate-950/80 dark:text-white sm:min-h-11 sm:text-sm ${className}`}
+      className={`form-control min-h-10 w-full rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition dark:border-white/10 dark:bg-slate-950/80 dark:text-white sm:min-h-11 sm:text-sm ${className}`}
       {...props}
     >
       {children}
@@ -1535,6 +1564,7 @@ export default function App() {
   const [paymentSettings, setPaymentSettings] = useState(() => (useDemoFallback ? readLocalData('paymentSettings', []) : []));
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [heroPhotoIndex, setHeroPhotoIndex] = useState(0);
+  const [photoViewerIndex, setPhotoViewerIndex] = useState(null);
   const [month, setMonth] = useState(new Date());
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -1652,6 +1682,8 @@ export default function App() {
   );
   const selectedPhotoData = propertyPhotos[selectedPhoto] || propertyPhotos[0] || placeholderPhoto;
   const heroPhoto = propertyPhotos[heroPhotoIndex] || selectedPhotoData;
+  const galleryPhotos = propertyPhotos.length ? propertyPhotos : [selectedPhotoData || placeholderPhoto];
+  const photoViewerPhoto = photoViewerIndex === null ? null : galleryPhotos[photoViewerIndex] || null;
   const calendarAvailability = useMemo(() => getCalendarAvailability(propertyReservations), [propertyReservations]);
   const nights = useMemo(() => {
     if (!booking.check_in || !booking.check_out) return 0;
@@ -1755,8 +1787,8 @@ export default function App() {
       if (Array.isArray(licenseRows)) setLicenses(licenseRows);
       if (Array.isArray(licenseHistoryRows)) setLicenseHistory(licenseHistoryRows);
       if (Array.isArray(paymentSettingRows)) setPaymentSettings(paymentSettingRows);
-      if (Array.isArray(suggestionRows)) setSuggestions(suggestionRows);
-      if (Array.isArray(supportTicketRows)) setSupportTickets(supportTicketRows);
+      if (Array.isArray(suggestionRows)) setSuggestions(suggestionRows.filter((item) => !item.deleted_at));
+      if (Array.isArray(supportTicketRows)) setSupportTickets(supportTicketRows.filter((item) => !item.deleted_at));
       if (Array.isArray(homeBannerRows)) setHomeBanners(homeBannerRows);
     } catch {
       // Keep the public page visible even when optional admin data cannot be loaded.
@@ -2191,6 +2223,8 @@ export default function App() {
 
     const reservation = {
       property_id: property.id,
+      owner_id: property.owner_id || null,
+      owner_email: property.owner_email || fallbackOwnerEmail || '',
       guest_user_id: normalizeRole(authProfile?.role) === 'hospede' ? authProfile.id : null,
       guest_name: String(booking.guest_name || '').trim(),
       guest_email: String(booking.guest_email || '').trim().toLowerCase(),
@@ -2208,6 +2242,7 @@ export default function App() {
       payment_status: 'pending',
       payment_method: booking.payment_method,
       source: 'site',
+      created_at: new Date().toISOString(),
     };
 
     let createdReservation = reservation;
@@ -2217,12 +2252,7 @@ export default function App() {
         createdReservation = await createReservationRecord(supabase, reservation);
         setReservations((current) => [...current, createdReservation]);
       } catch (error) {
-        console.error('createReservation failed', error);
-        const details = String(error?.message || '').toLowerCase();
-        const hint = details.includes('row-level security') || details.includes('permission')
-          ? 'Permissao do Supabase/RLS bloqueou a criacao.'
-          : 'Confira os dados e tente novamente.';
-        setMessage(`Nao foi possivel criar a reserva agora. ${hint}`);
+        setMessage(`Não foi possível criar a reserva agora: ${getSupabaseErrorReason(error)}`);
         return;
       }
     } else {
@@ -2494,11 +2524,14 @@ export default function App() {
   }
 
   async function addPhoto(photo) {
+    const sortOrder = propertyPhotos.length + 1;
+    const safeTitle = isTechnicalPhotoTitle(photo.alt) ? getGeneratedPhotoTitle(sortOrder) : String(photo.alt || '').trim();
     const nextPhoto = {
       id: crypto.randomUUID(),
       property_id: property.id,
-      sort_order: propertyPhotos.length + 1,
       ...photo,
+      alt: safeTitle,
+      sort_order: sortOrder,
     };
     setPhotos((current) => [...current, nextPhoto]);
     if (hasSupabaseConfig) {
@@ -2506,6 +2539,21 @@ export default function App() {
       await supabase.from('property_photos').insert(insertable);
     }
     setMessage('Foto adicionada a galeria.');
+  }
+
+  async function updatePhotoTitle(photoId, title) {
+    const targetPhoto = photos.find((photo) => photo.id === photoId);
+    if (!targetPhoto) return;
+    const ordered = photos
+      .filter((photo) => photo.property_id === targetPhoto.property_id)
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const index = ordered.findIndex((photo) => photo.id === photoId);
+    const safeTitle = String(title || '').trim() || getGeneratedPhotoTitle(index + 1);
+    setPhotos((current) => current.map((photo) => (photo.id === photoId ? { ...photo, alt: safeTitle } : photo)));
+    if (hasSupabaseConfig) {
+      await supabase.from('property_photos').update({ alt: safeTitle }).eq('id', photoId);
+    }
+    setMessage('Nome da foto atualizado.');
   }
 
   async function deletePhoto(photoId) {
@@ -2573,6 +2621,8 @@ export default function App() {
   async function createManualReservation(reservationDraft, targetProperty = property) {
     const reservation = {
       property_id: targetProperty.id,
+      owner_id: targetProperty.owner_id || null,
+      owner_email: targetProperty.owner_email || fallbackOwnerEmail || '',
       guest_name: reservationDraft.guest_name || 'Reserva manual',
       guest_email: reservationDraft.guest_email || adminEmail,
       guest_phone: reservationDraft.guest_phone || '',
@@ -2596,8 +2646,8 @@ export default function App() {
     if (hasSupabaseConfig) {
       try {
         created = await createReservationRecord(supabase, reservation);
-      } catch {
-        setMessage('Não foi possível criar a reserva manual agora.');
+      } catch (error) {
+        setMessage(`Não foi possível criar a reserva manual agora: ${getSupabaseErrorReason(error)}`);
         return false;
       }
     }
@@ -2736,7 +2786,7 @@ export default function App() {
 
   async function savePaymentSettings(nextSettings) {
     const maxInstallments = clampInstallmentLimit(nextSettings.max_installments, 1);
-    const normalizedInterestRates = normalizeInstallmentRates(nextSettings.interest_rates, maxInstallments, interestRates);
+    const normalizedInterestRates = normalizeInstallmentRates([], maxInstallments, interestRates);
     const payload = {
       ...nextSettings,
       property_id: property.id,
@@ -2752,7 +2802,7 @@ export default function App() {
         .select()
         .maybeSingle();
       if (error) {
-        setMessage('Não foi possível salvar as configurações financeiras.');
+        setMessage(`Não foi possível salvar as configurações financeiras: ${getSupabaseErrorReason(error)}`);
         return;
       }
       saved = data;
@@ -2914,6 +2964,7 @@ export default function App() {
             authProfile={authProfile}
             supportTickets={supportTickets}
             setSupportTickets={setSupportTickets}
+            adminLogs={adminLogs}
             onSignOut={signOut}
             onHome={() => navigateTo('/')}
             onRefresh={loadSupabaseData}
@@ -3296,27 +3347,70 @@ export default function App() {
               </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {(propertyPhotos.length ? propertyPhotos : [selectedPhotoData || placeholderPhoto]).map((photo, index) => (
+              {galleryPhotos.map((photo, index) => {
+                const displayTitle = getPhotoDisplayTitle(photo, index);
+                return (
                 <article key={photo.id || `photo-${index}`} className="flex min-h-0 flex-col overflow-hidden rounded-md border border-ink/10 bg-white shadow-sm dark:border-white/10 dark:bg-slate-800">
-                  <PropertyPhotoImage
-                    className="h-40 w-full object-cover sm:h-[220px]"
-                    src={photo?.url}
-                    alt={photo?.alt || `Foto ${index + 1} da casa`}
-                    sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
-                  />
+                  <button type="button" className="block text-left" onClick={() => setPhotoViewerIndex(index)}>
+                    <PropertyPhotoImage
+                      className="h-40 w-full object-cover sm:h-[220px]"
+                      src={photo?.url}
+                      alt={displayTitle}
+                      sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+                    />
+                  </button>
                   <div className="flex flex-1 items-center justify-between gap-3 p-3">
                     <span className="min-w-0 truncate text-sm font-bold text-ink/70 dark:text-white/75">
-                      {photo?.alt || `Foto ${index + 1}`}
+                      {displayTitle}
                     </span>
                     {photo?.is_primary || index === 0 ? (
                       <span className="shrink-0 rounded-md bg-leaf/10 px-2 py-1 text-[11px] font-black text-leaf">Imagem principal</span>
                     ) : null}
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>
+
+        {photoViewerPhoto ? (
+          <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true">
+            <div className="grid max-h-[92dvh] w-full max-w-5xl gap-3 overflow-hidden rounded-md bg-white p-3 text-ink shadow-soft dark:bg-slate-950 dark:text-white sm:p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="min-w-0 truncate text-lg font-black">{getPhotoDisplayTitle(photoViewerPhoto, photoViewerIndex)}</h3>
+                <Button type="button" variant="outline" className="h-10 w-10 px-0" onClick={() => setPhotoViewerIndex(null)} aria-label="Fechar visualizador">
+                  <X size={18} />
+                </Button>
+              </div>
+              <div className="relative min-h-0 overflow-hidden rounded-md bg-ink/5">
+                <PropertyPhotoImage
+                  className="max-h-[70dvh] w-full object-contain"
+                  src={photoViewerPhoto.url}
+                  alt={getPhotoDisplayTitle(photoViewerPhoto, photoViewerIndex)}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-between">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPhotoViewerIndex((current) => (current === null ? 0 : (current - 1 + galleryPhotos.length) % galleryPhotos.length))}
+                >
+                  <ChevronLeft size={18} />
+                  Anterior
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPhotoViewerIndex((current) => (current === null ? 0 : (current + 1) % galleryPhotos.length))}
+                >
+                  Próxima
+                  <ChevronRight size={18} />
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <section id="calendario" className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 dark:text-white">
           <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -3601,6 +3695,7 @@ export default function App() {
             createManualReservation={createManualReservation}
             createPaymentLink={createPaymentLink}
             reorderPhoto={reorderPhoto}
+            updatePhotoTitle={updatePhotoTitle}
             resolveAuthProfile={resolveAuthProfile}
             checkOwnerPropertyLimit={() => getFreshOwnerPropertyLimitState(authProfile?.id)}
             registerPayment={registerPayment}
@@ -3694,11 +3789,13 @@ function PublicTopBar({
 }) {
   const role = normalizeRole(authProfile?.role);
   const linkClass = 'header-link inline-flex items-center gap-2 whitespace-nowrap';
-  const openSupport = () => {
-    if (role === 'hospede') onOpenClient?.('reservations');
-    else if (role === 'super_admin') onOpenSuperAdmin?.('support');
-    else onOpenAdmin?.('settings');
-  };
+  const openSupport =
+    role === 'hospede'
+      ? null
+      : () => {
+          if (role === 'super_admin') onOpenSuperAdmin?.('support');
+          else onOpenAdmin?.('settings');
+        };
   const openSettings = () => {
     if (role === 'hospede') onOpenClient?.('settings');
     else if (role === 'super_admin') onOpenSuperAdmin?.('settings');
@@ -4689,6 +4786,7 @@ function SuperAdminDashboard({
   authProfile,
   supportTickets,
   setSupportTickets,
+  adminLogs = [],
   homeBanners = [],
   setHomeBanners,
   initialView = 'dashboard',
@@ -5275,7 +5373,7 @@ function SuperAdminDashboard({
                 key={key}
                 type="button"
                 className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 lg:py-3 ${
-                  view === key ? 'bg-leaf text-white' : 'hover:bg-mist'
+                  view === key ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20' : 'hover:bg-mist'
                 }`}
                 onClick={() => changeView(key)}
               >
@@ -6074,26 +6172,73 @@ function PlatformFinancialDashboard({
 }
 
 function SuperUsersTable({ title, rows, notice, onRoleChange, onDeleteUser }) {
+  const [selectedRoles, setSelectedRoles] = useState({});
+
   return (
-    <div className="grid gap-3 rounded-md bg-white p-4 shadow-sm">
+    <div className="grid min-w-0 gap-3 rounded-md bg-white p-3 shadow-sm sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-xl font-black">{title}</h2>
-        {notice ? <p className="text-sm font-bold text-leaf">{notice}</p> : null}
+        <h2 className="min-w-0 break-words text-xl font-black">{title}</h2>
+        {notice ? <p className="min-w-0 break-words text-sm font-bold text-leaf sm:text-right">{notice}</p> : null}
       </div>
       <div className="grid gap-3">
         {rows.length ? (
           rows.map((profile) => {
             const role = normalizeRole(profile.role);
+            const profileKey = profile.id || profile.email;
+            const selectedRole = selectedRoles[profileKey] || role || 'hospede';
+            const hasRoleChange = selectedRole !== role;
             return (
-              <div key={profile.id || profile.email} className="grid gap-3 rounded-md border border-ink/10 bg-[#f8fbff] p-3 lg:grid-cols-[1fr_auto] lg:items-center">
-                <div>
-                  <p className="font-black">{profile.full_name || profile.email}</p>
-                  <p className="text-sm font-semibold text-ink/65">{profile.email}</p>
+              <div key={profileKey} className="grid min-w-0 gap-3 rounded-md border border-ink/10 bg-[#f8fbff] p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                <div className="min-w-0">
+                  <p className="break-words font-black">{profile.full_name || profile.email}</p>
+                  <p className="break-all text-sm font-semibold text-ink/65">{profile.email}</p>
                   <p className="mt-1 text-xs font-black uppercase tracking-wide text-ink/50">
                     {roleLabels[role] || role || 'Sem role'}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2 lg:justify-end">
+                <div className="grid min-w-0 gap-3 rounded-md bg-white/75 p-3 shadow-sm ring-1 ring-ink/5 sm:hidden">
+                  <Field label="Perfil:">
+                    <SelectInput
+                      className="w-full"
+                      value={selectedRole}
+                      onChange={(event) =>
+                        setSelectedRoles((current) => ({
+                          ...current,
+                          [profileKey]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="super_admin">Super Admin</option>
+                      <option value="proprietario">Proprietário</option>
+                      <option value="hospede">Hóspede</option>
+                    </SelectInput>
+                  </Field>
+                  <div className="grid gap-2">
+                    <p className="text-xs font-black uppercase tracking-wide text-ink/50">Ações:</p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      disabled={!hasRoleChange}
+                      onClick={() => onRoleChange(profile, selectedRole)}
+                    >
+                      <Save size={16} />
+                      Salvar
+                    </Button>
+                    <div className="mt-1 border-t border-red-200 pt-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full border-red-200 text-red-700 hover:bg-red-50"
+                        onClick={() => onDeleteUser(profile)}
+                      >
+                        <Trash2 size={16} />
+                        Excluir
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
                   {[
                     ['super_admin', 'Super Admin'],
                     ['proprietario', 'Proprietário'],
@@ -6109,7 +6254,7 @@ function SuperUsersTable({ title, rows, notice, onRoleChange, onDeleteUser }) {
                       {label}
                     </Button>
                   ))}
-                  <Button type="button" variant="outline" className="h-10 w-10 px-0 sm:w-auto sm:px-3" onClick={() => onDeleteUser(profile)}>
+                  <Button type="button" variant="outline" className="h-10 w-10 border-red-200 px-0 text-red-700 hover:bg-red-50 sm:ml-2 sm:w-auto sm:px-3" onClick={() => onDeleteUser(profile)}>
                     <Trash2 size={16} />
                     <span className="sr-only sm:not-sr-only">Excluir</span>
                   </Button>
@@ -6300,7 +6445,7 @@ function SupportTicketsPanel({ rows, setRows }) {
             );
           })
         ) : (
-          <EmptyState title="Nenhum chamado" text="Os chamados de suporte aparecerão aqui." />
+          <EmptyState title="Nenhum chamado aberto." text="Os chamados enviados pelos usuários aparecerão aqui." />
         )}
       </div>
     </section>
@@ -6382,7 +6527,7 @@ function OwnerSuggestionsPanel({ rows, allRows = rows, setRows, properties }) {
             );
           })
         ) : (
-          <EmptyState title="Nenhuma sugestão" text="As sugestões dos hóspedes aparecerão aqui." />
+          <EmptyState title="Nenhuma sugestão recebida." text="As mensagens dos hóspedes aparecerão aqui." />
         )}
       </div>
     </section>
@@ -6910,7 +7055,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                 key={key}
                 type="button"
                 className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 lg:py-3 ${
-                  view === key ? 'bg-ink text-white' : 'hover:bg-mist'
+                  view === key ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20' : 'hover:bg-mist'
                 }`}
                 onClick={() => changeView(key)}
               >
@@ -7015,7 +7160,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
                   );
                 })
               ) : (
-                <EmptyState title="Nenhuma solicitação encontrada" text="Suas reservas aparecerão aqui depois da solicitação." />
+                <EmptyState title="Nenhuma solicitação encontrada." text="Suas reservas aparecerão aqui depois da solicitação." />
               )}
             </div>
           ) : null}
@@ -7134,7 +7279,7 @@ function SuggestionForm({ authProfile, onSubmit }) {
 function PortalCard({ icon: Icon, label, value }) {
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
-      <PanelIcon icon={Icon} className="text-leaf" size={20} />
+      <PanelIcon icon={Icon} className="text-sky-600 dark:text-sky-300" size={20} />
       <p className="mt-3 text-xs font-bold uppercase tracking-wide text-ink/50">{label}</p>
       <p className="mt-1 text-xl font-black">{value}</p>
     </div>
@@ -7143,9 +7288,12 @@ function PortalCard({ icon: Icon, label, value }) {
 
 function EmptyState({ title, text }) {
   return (
-    <div className="rounded-md border border-dashed border-ink/20 bg-white p-6 text-center">
-      <p className="font-black">{title}</p>
-      <p className="mt-2 text-sm text-ink/60">{text}</p>
+    <div className="grid justify-items-center rounded-md border border-dashed border-sky-200 bg-gradient-to-br from-white to-sky-50/70 p-6 text-center shadow-sm dark:border-sky-400/20 dark:from-slate-900 dark:to-slate-900">
+      <span className="grid h-11 w-11 place-items-center rounded-md bg-sky-100 text-sky-700 dark:bg-sky-400/15 dark:text-sky-200">
+        <ClipboardList size={20} aria-hidden="true" />
+      </span>
+      <p className="mt-3 font-black text-ink dark:text-white">{title}</p>
+      {text ? <p className="mt-2 max-w-xl text-sm leading-6 text-ink/60 dark:text-white/65">{text}</p> : null}
     </div>
   );
 }
@@ -7232,7 +7380,7 @@ function FinanceCard({ icon: Icon, label, value }) {
   return (
     <div className="rounded-md bg-white p-4 shadow-sm">
       <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-md bg-mist text-leaf">
+        <span className="grid h-10 w-10 place-items-center rounded-md bg-sky-50 text-sky-700 dark:bg-sky-400/15 dark:text-sky-200">
           <PanelIcon icon={Icon} size={18} />
         </span>
         <span className="text-sm font-semibold text-ink/65">{label}</span>
@@ -7257,12 +7405,12 @@ function CalendarGrid({ availability, month }) {
           <h3 className="mt-1 text-2xl font-black capitalize">{format(month, "MMMM 'de' yyyy", { locale: ptBR })}</h3>
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm sm:flex">
-          <span className="inline-flex items-center justify-center gap-2 rounded-md bg-leaf/10 px-3 py-2 font-bold text-leaf dark:bg-blue-400/15 dark:text-blue-200">
-            <span className="h-2.5 w-2.5 rounded-sm bg-leaf dark:bg-blue-300" />
+          <span className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-50 px-3 py-2 font-bold text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-200">
+            <span className="h-2.5 w-2.5 rounded-sm bg-cyan-500 dark:bg-cyan-300" />
             {availableDays} livres
           </span>
-          <span className="inline-flex items-center justify-center gap-2 rounded-md bg-coral/10 px-3 py-2 font-bold text-coral dark:bg-sky-400/15 dark:text-sky-200">
-            <span className="h-2.5 w-2.5 rounded-sm bg-coral dark:bg-sky-300" />
+          <span className="inline-flex items-center justify-center gap-2 rounded-md bg-sky-50 px-3 py-2 font-bold text-sky-700 dark:bg-sky-400/15 dark:text-sky-200">
+            <span className="h-2.5 w-2.5 rounded-sm bg-sky-500 dark:bg-sky-300" />
             {unavailableDays} indisponíveis
           </span>
         </div>
@@ -7294,7 +7442,7 @@ function CalendarGrid({ availability, month }) {
               <div className="flex min-h-[72px] flex-col justify-between gap-2 sm:min-h-[84px]">
                 <span
                   className={`grid h-8 w-8 place-items-center rounded-md text-sm font-black ${
-                    today ? 'bg-ink text-white dark:bg-white dark:text-ink' : ''
+                    today ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20 dark:bg-sky-400 dark:text-slate-950' : ''
                   }`}
                 >
                   {format(day, 'd')}
@@ -7302,8 +7450,8 @@ function CalendarGrid({ availability, month }) {
                 <span
                   className={`inline-flex min-h-7 items-center justify-center rounded-md px-1.5 py-1 text-center text-[10px] font-black leading-tight sm:px-2 sm:text-[11px] ${
                     unavailable
-                      ? 'bg-coral text-white dark:bg-sky-500 dark:text-white'
-                      : 'bg-leaf/10 text-leaf dark:bg-blue-400/15 dark:text-blue-200'
+                      ? 'bg-sky-600 text-white dark:bg-sky-500 dark:text-white'
+                      : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-200'
                   }`}
                   title={availabilityItem?.label || 'Livre'}
                 >
@@ -7343,6 +7491,7 @@ function AdminPanel({
   createManualReservation,
   createPaymentLink,
   reorderPhoto,
+  updatePhotoTitle,
   resolveAuthProfile,
   checkOwnerPropertyLimit,
   onClose,
@@ -7427,7 +7576,7 @@ function AdminPanel({
     bank_document: '',
     card_payment_url: '',
     max_installments: 4,
-    interest_rates: normalizeInstallmentRates(defaultInterestRates, 4, defaultInterestRates),
+    interest_rates: normalizeInstallmentRates([], 4, defaultInterestRates),
     payment_instructions: '',
   });
   const [draft, setDraft] = useState({
@@ -7437,6 +7586,7 @@ function AdminPanel({
   });
   const [newProperty, setNewProperty] = useState(() => readLocalData(ownerPropertyDraftKey, createEmptyPropertyDraft()));
   const [photo, setPhoto] = useState({ url: '', alt: '' });
+  const [photoTitleEdits, setPhotoTitleEdits] = useState({});
   const [licenseDrafts, setLicenseDrafts] = useState(() =>
     Object.fromEntries(
       properties.map((item) => [
@@ -7500,8 +7650,8 @@ function AdminPanel({
   const reservationListRows = adminView === 'confirmations' ? pendingReservations : visibleReservations;
   const reservationListTitle = adminView === 'confirmations' ? 'Confirmações de reserva' : 'Reservas';
   const reservationEmptyTitle =
-    adminView === 'confirmations' ? 'Nenhuma solicitação aguardando confirmação.' : 'Nenhuma reserva ativa para esta casa.';
-  const reservationEmptyText = adminView === 'confirmations' ? 'As solicitações pendentes aparecerão aqui.' : '';
+    adminView === 'confirmations' ? 'Nenhuma solicitação aguardando confirmação.' : 'Nenhuma reserva encontrada.';
+  const reservationEmptyText = adminView === 'confirmations' ? '' : 'Crie uma reserva manual ou aguarde novas solicitações.';
 
   useEffect(() => {
     const storedView = readLocalData(uiStateKeys.adminView, '');
@@ -7845,8 +7995,8 @@ function AdminPanel({
 
   async function handlePhotoFiles(event) {
     const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
-    for (const file of files) {
-      const alt = file.name.replace(/\.[^.]+$/, '');
+    for (const [index, file] of files.entries()) {
+      const alt = getGeneratedPhotoTitle(propertyPhotos.length + index + 1);
       if (hasSupabaseConfig) {
         const storagePath = `${property.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '-')}`;
         const { error } = await supabase.storage.from('property-photos').upload(storagePath, file, {
@@ -8471,7 +8621,7 @@ function AdminPanel({
                     key={key}
                     type="button"
                     className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-black transition lg:gap-3 ${
-                      adminView === key ? 'bg-ink text-white' : 'hover:bg-mist'
+                      adminView === key ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20' : 'hover:bg-mist'
                     }`}
                     onClick={() => changeAdminView(key)}
                   >
@@ -8553,7 +8703,7 @@ function AdminPanel({
                 ) : (
                   <button
                     type="button"
-                    className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-700 text-2xl font-black leading-none text-white shadow-[0_16px_34px_rgba(37,99,235,0.36)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_42px_rgba(37,99,235,0.44)]"
+                    className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-700 text-2xl font-black leading-none text-white shadow-[0_16px_34px_rgba(37,99,235,0.36)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_42px_rgba(37,99,235,0.44)]"
                     onClick={() => {
                       if (showNewProperty) {
                         setShowNewProperty(false);
@@ -9181,11 +9331,11 @@ function AdminPanel({
                   required
                 />
               </Field>
-              <Field label="Descrição da foto">
+              <Field label="Título da foto">
                 <TextInput
                   value={photo.alt}
                   onChange={(event) => setPhoto({ ...photo, alt: event.target.value })}
-                  placeholder="Sala, quarto, fachada..."
+                  placeholder="Foto 1, sala, quarto, fachada..."
                 />
               </Field>
               <Button type="submit" variant="secondary">
@@ -9194,20 +9344,47 @@ function AdminPanel({
               </Button>
               {propertyPhotos.length ? (
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {propertyPhotos.map((item, index) => (
+                  {propertyPhotos.map((item, index) => {
+                    const displayTitle = getPhotoDisplayTitle(item, index);
+                    const editValue = photoTitleEdits[item.id] ?? displayTitle;
+                    return (
                     <article key={item.id} className="flex min-h-0 flex-col overflow-hidden rounded-md border border-ink/10 bg-[#f4f8ff] shadow-sm">
                       <PropertyPhotoImage
                         className="h-40 w-full object-cover sm:h-[220px]"
                         src={item.url}
-                        alt={item.alt || 'Foto da casa'}
+                        alt={displayTitle}
                         sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
                       />
                       <div className="flex flex-1 flex-col gap-3 p-3">
                         <div className="min-w-0">
-                          <span className="block truncate text-sm font-semibold text-ink/70">{item.alt || 'Foto sem descrição'}</span>
+                          <span className="block truncate text-sm font-semibold text-ink/70">{displayTitle}</span>
                           {item.is_primary || item.sort_order === 1 || index === 0 ? (
                             <span className="mt-2 inline-flex rounded-md bg-leaf/10 px-2 py-1 text-xs font-black text-leaf">Imagem principal</span>
                           ) : null}
+                        </div>
+                        <div className="grid gap-2">
+                          <Field label="Nome da foto">
+                            <TextInput
+                              value={editValue}
+                              onChange={(event) =>
+                                setPhotoTitleEdits((current) => ({ ...current, [item.id]: event.target.value }))
+                              }
+                              placeholder={getGeneratedPhotoTitle(index + 1)}
+                            />
+                          </Field>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full min-h-9 px-3 py-2"
+                            onClick={() => {
+                              const nextTitle = String(editValue || '').trim() || getGeneratedPhotoTitle(index + 1);
+                              setPhotoTitleEdits((current) => ({ ...current, [item.id]: nextTitle }));
+                              updatePhotoTitle(item.id, nextTitle);
+                            }}
+                          >
+                            <Save size={16} />
+                            Salvar nome
+                          </Button>
                         </div>
                         <div className="mt-auto flex items-center justify-end gap-2 border-t border-ink/10 pt-3">
                           <Button type="button" variant="outline" className="min-h-9 px-3 py-2" onClick={() => reorderPhoto(item.id, -1)} aria-label="Mover foto para cima">
@@ -9222,7 +9399,8 @@ function AdminPanel({
                         </div>
                       </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-sm font-semibold text-ink/60">Nenhuma foto cadastrada ainda.</p>
@@ -9466,10 +9644,10 @@ function AdminPanel({
                     );
                   })
                 ) : (
-                  <div className="rounded-md bg-white p-4 text-sm font-semibold text-ink/60 shadow-sm">
-                    <p>{reservationEmptyTitle}</p>
-                    {reservationEmptyText ? <p className="mt-1 text-sm font-medium text-ink/45">{reservationEmptyText}</p> : null}
-                  </div>
+                  <EmptyState
+                    title={adminView === 'confirmations' ? 'Nenhuma solicitação aguardando confirmação.' : 'Nenhuma reserva encontrada.'}
+                    text={adminView === 'confirmations' ? '' : 'Crie uma reserva manual ou aguarde novas solicitações.'}
+                  />
                 )}
               </div>
             </section>
@@ -9630,131 +9808,168 @@ function AdminPanel({
 
             {adminView === 'settings' ? (
               <section className="grid gap-4 rounded-md bg-white p-4 shadow-sm">
-                <h3 className="text-xl font-black">Configurações</h3>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {interestRates.map((item, index) => (
-                    <Field key={item.installments} label={`${item.installments}x - juros (%)`}>
-                      <TextInput
-                        type="number"
-                        value={item.rate}
-                        disabled={!isOwnerAdmin}
-                        onChange={(event) =>
-                          setInterestRates((current) =>
-                            current.map((rate, rateIndex) =>
-                              rateIndex === index ? { ...rate, rate: Number(event.target.value) } : rate,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                  ))}
+                <div>
+                  <h3 className="text-xl font-black">Configurações</h3>
+                  <p className="mt-1 text-sm text-ink/65">Dados usados nas confirmações de reserva e nas opções de pagamento do hóspede.</p>
                 </div>
-                {isOwnerAdmin ? (
-                  <div className="flex justify-end">
-                    <Button type="button" onClick={() => saveInterestRates(interestRates)}>
-                      <Save size={18} />
-                      Salvar juros
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="rounded-md bg-[#f4f8ff] p-3 text-sm font-semibold text-ink/65">
-                    Juros definidos pelo Super Admin. Proprietarios podem visualizar, mas nao alterar.
-                  </p>
-                )}
                 <form
-                  className="grid gap-4 rounded-md bg-[#f4f8ff] p-4"
+                  className="grid gap-4"
                   onSubmit={(event) => {
                     event.preventDefault();
                     savePaymentSettings(paymentDraft);
                   }}
                 >
-                  <div>
-                    <h4 className="font-black">Configurações financeiras do proprietário</h4>
-                    <p className="mt-1 text-sm text-ink/65">Esses dados entram automaticamente na confirmação enviada ao hóspede.</p>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Chave Pix">
-                      <TextInput value={paymentDraft.pix_key} onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_key: event.target.value })} />
-                    </Field>
-                    <Field label="Tipo da chave Pix">
-                      <SelectInput value={paymentDraft.pix_key_type} onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_key_type: event.target.value })}>
-                        <option value="cpf">CPF</option>
-                        <option value="cnpj">CNPJ</option>
-                        <option value="email">E-mail</option>
-                        <option value="phone">Telefone</option>
-                        <option value="random">Aleatória</option>
-                      </SelectInput>
-                    </Field>
-                    <Field label="Nome do recebedor">
-                      <TextInput
-                        value={paymentDraft.pix_receiver_name}
-                        onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_receiver_name: event.target.value })}
-                      />
-                    </Field>
-                    <Field label="Banco">
-                      <TextInput value={paymentDraft.bank_name} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_name: event.target.value })} />
-                    </Field>
-                    <Field label="Agência">
-                      <TextInput value={paymentDraft.bank_agency} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_agency: event.target.value })} />
-                    </Field>
-                    <Field label="Conta">
-                      <TextInput value={paymentDraft.bank_account} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_account: event.target.value })} />
-                    </Field>
-                    <Field label="Tipo de conta">
-                      <SelectInput
-                        value={paymentDraft.bank_account_type}
-                        onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_account_type: event.target.value })}
-                      >
-                        <option value="corrente">Corrente</option>
-                        <option value="poupanca">Poupança</option>
-                        <option value="pagamento">Pagamento</option>
-                      </SelectInput>
-                    </Field>
-                    <Field label="Titular">
-                      <TextInput value={paymentDraft.bank_holder} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_holder: event.target.value })} />
-                    </Field>
-                    <Field label="CPF/CNPJ">
-                      <TextInput value={paymentDraft.bank_document} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_document: event.target.value })} />
-                    </Field>
-                    <Field label="Link de pagamento cartão">
-                      <TextInput
-                        value={paymentDraft.card_payment_url}
-                        onChange={(event) => setPaymentDraft({ ...paymentDraft, card_payment_url: event.target.value })}
-                        placeholder="https://..."
-                      />
-                    </Field>
-                    <Field label="Máximo de parcelas">
-                      <TextInput
-                        type="number"
-                        min="1"
-                        value={paymentDraft.max_installments}
-                        onChange={(event) => updatePaymentMaxInstallments(event.target.value)}
-                      />
-                    </Field>
-                  </div>
-                  <div className="grid gap-3 rounded-md border border-ink/10 bg-white p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
-                    {normalizeInstallmentRates(paymentDraft.interest_rates, paymentDraft.max_installments, interestRates).map((item) => (
-                      <Field key={item.installments} label={`${item.installments}x - juros (%)`}>
+                  <section className="grid gap-3 rounded-md bg-[#f4f8ff] p-3 sm:p-4">
+                    <div>
+                      <h4 className="font-black">Dados Pix</h4>
+                      <p className="mt-1 text-sm text-ink/65">Chave e identificação do recebedor para confirmação do pagamento.</p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Chave Pix">
+                        <TextInput value={paymentDraft.pix_key} onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_key: event.target.value })} />
+                      </Field>
+                      <Field label="Tipo da chave Pix">
+                        <SelectInput value={paymentDraft.pix_key_type} onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_key_type: event.target.value })}>
+                          <option value="cpf">CPF</option>
+                          <option value="cnpj">CNPJ</option>
+                          <option value="email">E-mail</option>
+                          <option value="phone">Telefone</option>
+                          <option value="random">Aleatória</option>
+                        </SelectInput>
+                      </Field>
+                      <Field label="Nome do recebedor">
                         <TextInput
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={item.rate}
-                          onChange={(event) => updatePaymentInterestRate(item.installments, event.target.value)}
+                          value={paymentDraft.pix_receiver_name}
+                          onChange={(event) => setPaymentDraft({ ...paymentDraft, pix_receiver_name: event.target.value })}
                         />
                       </Field>
-                    ))}
+                    </div>
+                  </section>
+
+                  <section className="grid gap-3 rounded-md bg-[#f4f8ff] p-3 sm:p-4">
+                    <div>
+                      <h4 className="font-black">Dados Bancários</h4>
+                      <p className="mt-1 text-sm text-ink/65">Informações para transferência, depósito ou conferência manual.</p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <Field label="Banco">
+                        <TextInput value={paymentDraft.bank_name} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_name: event.target.value })} />
+                      </Field>
+                      <Field label="Agência">
+                        <TextInput value={paymentDraft.bank_agency} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_agency: event.target.value })} />
+                      </Field>
+                      <Field label="Conta">
+                        <TextInput value={paymentDraft.bank_account} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_account: event.target.value })} />
+                      </Field>
+                      <Field label="Tipo de conta">
+                        <SelectInput
+                          value={paymentDraft.bank_account_type}
+                          onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_account_type: event.target.value })}
+                        >
+                          <option value="corrente">Corrente</option>
+                          <option value="poupanca">Poupança</option>
+                          <option value="pagamento">Pagamento</option>
+                        </SelectInput>
+                      </Field>
+                      <Field label="Titular">
+                        <TextInput value={paymentDraft.bank_holder} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_holder: event.target.value })} />
+                      </Field>
+                      <Field label="CPF/CNPJ">
+                        <TextInput value={paymentDraft.bank_document} onChange={(event) => setPaymentDraft({ ...paymentDraft, bank_document: event.target.value })} />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <section className="grid gap-3 rounded-md bg-[#f4f8ff] p-3 sm:p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h4 className="flex items-center gap-2 font-black">
+                          {!isOwnerAdmin ? <Lock size={17} className="text-ink/45" aria-hidden="true" /> : null}
+                          Parcelamento e Juros
+                        </h4>
+                        <p className="mt-1 text-sm text-ink/65">
+                          Juros definidos pelo Super Admin. Proprietários podem visualizar, mas não alterar.
+                        </p>
+                      </div>
+                      {!isOwnerAdmin ? (
+                        <span className="inline-flex w-fit items-center gap-2 rounded-md bg-ink/5 px-3 py-2 text-xs font-black uppercase tracking-wide text-ink/45">
+                          <Lock size={14} aria-hidden="true" />
+                          Bloqueado
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Link de pagamento cartão">
+                        <TextInput
+                          value={paymentDraft.card_payment_url}
+                          onChange={(event) => setPaymentDraft({ ...paymentDraft, card_payment_url: event.target.value })}
+                          placeholder="https://..."
+                        />
+                      </Field>
+                      <Field label="Máximo de parcelas">
+                        <TextInput
+                          type="number"
+                          min="1"
+                          max="24"
+                          value={paymentDraft.max_installments}
+                          onChange={(event) => {
+                            const maxInstallments = clampInstallmentLimit(event.target.value, 1);
+                            setPaymentDraft((current) => ({ ...current, max_installments: maxInstallments }));
+                          }}
+                        />
+                      </Field>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {normalizeInstallmentRates([], paymentDraft.max_installments, interestRates).map((item, index) => (
+                        <Field key={item.installments} label={`${item.installments}x - juros (%)`}>
+                          <TextInput
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.rate}
+                            disabled={!isOwnerAdmin}
+                            readOnly={!isOwnerAdmin}
+                            className={!isOwnerAdmin ? 'cursor-not-allowed bg-ink/5 text-ink/55 shadow-none' : ''}
+                            onChange={(event) =>
+                              setInterestRates((current) => {
+                                const nextRates = normalizeInstallmentRates(current, paymentDraft.max_installments, current);
+                                nextRates[index] = { ...nextRates[index], rate: Number(event.target.value || 0) };
+                                return nextRates;
+                              })
+                            }
+                          />
+                        </Field>
+                      ))}
+                    </div>
+                    {isOwnerAdmin ? (
+                      <div className="flex justify-end">
+                        <Button type="button" onClick={() => saveInterestRates(interestRates)}>
+                          <Save size={18} />
+                          Salvar juros
+                        </Button>
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="grid gap-3 rounded-md bg-[#f4f8ff] p-3 sm:p-4">
+                    <div>
+                      <h4 className="font-black">Instruções de Pagamento</h4>
+                      <p className="mt-1 text-sm text-ink/65">Mensagem exibida na confirmação enviada ao hóspede.</p>
+                    </div>
+                    <Field label="Instruções">
+                      <TextArea
+                        value={paymentDraft.payment_instructions}
+                        onChange={(event) => setPaymentDraft({ ...paymentDraft, payment_instructions: event.target.value })}
+                      />
+                    </Field>
+                  </section>
+
+                  <div className="flex justify-end">
+                    <Button type="submit" variant="secondary" className="w-full sm:w-auto">
+                      <Save size={18} />
+                      Salvar dados financeiros
+                    </Button>
                   </div>
-                  <Field label="Instruções de pagamento">
-                    <TextArea
-                      value={paymentDraft.payment_instructions}
-                      onChange={(event) => setPaymentDraft({ ...paymentDraft, payment_instructions: event.target.value })}
-                    />
-                  </Field>
-                  <Button type="submit" variant="secondary">
-                    <Save size={18} />
-                    Salvar dados financeiros
-                  </Button>
                 </form>
               </section>
             ) : null}
