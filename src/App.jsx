@@ -723,11 +723,14 @@ function normalizeFunctionErrorMessage(message, fallback = 'Erro interno ao exec
   const combined = `${codeText} ${text}`.trim();
   const searchable = combined || String(status || '');
   if (!text && !codeText) return fallback;
-  if (/missing_auth_token|token de sess[aã]o n[aã]o enviado|^unauthorized\.?$/i.test(searchable)) {
-    return 'Não foi possível validar sua sessão. Faça login novamente como Super Admin.';
+  if (/missing_auth_token|token de sess[aã]o n[aã]o enviado/i.test(searchable)) {
+    return 'Token de sessão não enviado para a Edge Function. Faça login novamente como Super Admin.';
+  }
+  if (/^unauthorized\.?$/i.test(searchable) || Number(status) === 401) {
+    return 'A Edge Function recusou a sessão atual. Saia e entre novamente como Super Admin.';
   }
   if (/invalid_session|jwt|token expired|usu[aá]rio autenticado n[aã]o encontrado|sess[aã]o inv[aá]lida|sess[aã]o expirada/i.test(searchable)) {
-    return 'Não foi possível validar sua sessão. Faça login novamente como Super Admin.';
+    return 'Sessão expirada. Faça login novamente como Super Admin.';
   }
   if (/requester_profile_missing|perfil super_admin n[aã]o encontrado|perfil .*n[aã]o encontrado/i.test(searchable)) {
     return 'Perfil Super Admin não encontrado.';
@@ -4884,20 +4887,27 @@ function SuperAdminDashboard({
         }
       }
       if (!session?.access_token) {
-        setUserNotice('Não foi possível validar sua sessão. Faça login novamente como Super Admin.');
+        setUserNotice('Sessão expirada. Faça login novamente como Super Admin.');
         return;
       }
       if (expiresAtMs && expiresAtMs < Date.now()) {
-        setUserNotice('Não foi possível validar sua sessão. Faça login novamente como Super Admin.');
+        setUserNotice('Sessão expirada. Faça login novamente como Super Admin.');
         return;
       }
-      const authorizationHeader = `Bearer ${session.access_token}`;
-      const functionsClient = supabase.functions;
-      functionsClient.setAuth(session.access_token);
+
+      const { data: currentUserData, error: currentUserError } = await safeSupabaseQuery(
+        supabase.auth.getUser(session.access_token),
+        authRequestTimeoutMs,
+        'Validação da sessão excedeu o tempo limite.',
+      );
+      if (currentUserError || !currentUserData?.user) {
+        setUserNotice('Sessão expirada. Faça login novamente como Super Admin.');
+        return;
+      }
+
       const { data, error } = await safeSupabaseQuery(
-        functionsClient.invoke('delete-user-cascade', {
-          body: { userId: profile.id, user_id: profile.id, email: profile.email },
-          headers: { Authorization: authorizationHeader },
+        supabase.functions.invoke('delete-user-cascade', {
+          body: { userId: profile.id },
         }),
         15000,
         'Exclusão de usuário excedeu o tempo limite.',
