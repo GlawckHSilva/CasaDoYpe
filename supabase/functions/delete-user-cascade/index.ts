@@ -2,6 +2,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
 
 const allowedOrigins = [
   'https://casa-do-ype.vercel.app',
+  'https://hospedex.vercel.app',
+  'https://hospedex.com.br',
+  'https://www.hospedex.com.br',
   'http://localhost:5173',
   'http://localhost:5185',
   'http://127.0.0.1:5173',

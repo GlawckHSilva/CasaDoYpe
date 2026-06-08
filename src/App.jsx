@@ -724,22 +724,22 @@ function normalizeFunctionErrorMessage(message, fallback = 'Erro interno ao exec
   const searchable = combined || String(status || '');
   if (!text && !codeText) return fallback;
   if (/missing_auth_token|token de sess[aã]o n[aã]o enviado|^unauthorized\.?$/i.test(searchable)) {
-    return 'Token de sessão não enviado para a Edge Function.';
+    return 'Não foi possível validar sua sessão. Faça login novamente como Super Admin.';
   }
   if (/invalid_session|jwt|token expired|usu[aá]rio autenticado n[aã]o encontrado|sess[aã]o inv[aá]lida|sess[aã]o expirada/i.test(searchable)) {
-    return 'Usuário autenticado não encontrado. Faça login novamente.';
+    return 'Não foi possível validar sua sessão. Faça login novamente como Super Admin.';
   }
   if (/requester_profile_missing|perfil super_admin n[aã]o encontrado|perfil .*n[aã]o encontrado/i.test(searchable)) {
-    return 'Perfil super_admin não encontrado.';
+    return 'Perfil Super Admin não encontrado.';
   }
   if (/not_super_admin|only super admins|permission|permiss/i.test(searchable)) {
     return 'Você não tem permissão para excluir usuários.';
   }
   if (/missing_service_role|service role/i.test(searchable)) {
-    return 'Service role não configurada na Edge Function.';
+    return 'A exclusão de usuários não está configurada no Supabase.';
   }
   if (/missing_supabase_url|supabase_url/i.test(searchable)) {
-    return 'Edge Function sem SUPABASE_URL configurada.';
+    return 'A exclusão de usuários não está configurada no Supabase.';
   }
   if (/user_not_found|usuario nao encontrado|usu[aá]rio n[aã]o encontrado|not found/i.test(searchable)) {
     return 'Usuário alvo não encontrado.';
@@ -4777,6 +4777,15 @@ function SuperAdminDashboard({
     ['settings', 'Configurações', 'settings'],
   ];
   const activeMenuLabel = menu.find(([key]) => key === view)?.[1] || 'Dashboard';
+  const searchPlaceholderByView = {
+    financial: 'Buscar lançamento...',
+    support: 'Buscar chamados...',
+    banners: 'Buscar banner...',
+    owners: 'Buscar proprietário por nome ou e-mail...',
+    guests: 'Buscar hóspede por nome ou e-mail...',
+    licenses: 'Buscar licença, proprietário ou imóvel...',
+  };
+  const searchPlaceholder = searchPlaceholderByView[view] || 'Buscar...';
 
   function syncPropertyLicense(savedLicense) {
     if (!savedLicense?.property_id) return;
@@ -4875,16 +4884,18 @@ function SuperAdminDashboard({
         }
       }
       if (!session?.access_token) {
-        setUserNotice('Token de sessão não enviado para a Edge Function.');
+        setUserNotice('Não foi possível validar sua sessão. Faça login novamente como Super Admin.');
         return;
       }
       if (expiresAtMs && expiresAtMs < Date.now()) {
-        setUserNotice('Usuário autenticado não encontrado. Faça login novamente.');
+        setUserNotice('Não foi possível validar sua sessão. Faça login novamente como Super Admin.');
         return;
       }
       const authorizationHeader = `Bearer ${session.access_token}`;
+      const functionsClient = supabase.functions;
+      functionsClient.setAuth(session.access_token);
       const { data, error } = await safeSupabaseQuery(
-        supabase.functions.invoke('delete-user-cascade', {
+        functionsClient.invoke('delete-user-cascade', {
           body: { userId: profile.id, user_id: profile.id, email: profile.email },
           headers: { Authorization: authorizationHeader },
         }),
@@ -4892,7 +4903,7 @@ function SuperAdminDashboard({
         'Exclusão de usuário excedeu o tempo limite.',
       );
       if (error) {
-        const message = await getFunctionErrorMessage(error, 'Edge Function não configurada ou não publicada.');
+        const message = await getFunctionErrorMessage(error, 'Não foi possível concluir a exclusão no Supabase.');
         setUserNotice(`Não foi possível excluir: ${message}`);
         return;
       }
@@ -5291,7 +5302,7 @@ function SuperAdminDashboard({
                 <RefreshCw size={18} />
                 {refreshing ? 'Atualizando' : 'Atualizar'}
               </Button>
-              <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtrar licenças, proprietários..." />
+              <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} />
             </div>
           </header>
 
