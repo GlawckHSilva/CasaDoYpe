@@ -3957,7 +3957,7 @@ const platformPageFeatures = [
     description: 'Controle planos, vencimentos e quantidade de imóveis liberados.',
   },
   {
-    title: 'Portal do Hóspede',
+    title: 'Portal do hóspede',
     Icon: Users,
     preview: 'guest',
     description: 'Área exclusiva para clientes acompanharem reservas e informações.',
@@ -4207,7 +4207,7 @@ const platformPreviewConfigs = {
   },
   guest: {
     eyebrow: 'Hóspede',
-    title: 'Portal do cliente',
+    title: 'Portal do hóspede',
     metrics: [
       ['2', 'Reservas'],
       ['1', 'Suporte'],
@@ -6860,14 +6860,14 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
       <MobilePanelDrawer
         open={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
-        title="Portal do cliente"
+        title="Portal do hóspede"
         subtitle={authProfile?.email}
         menu={menu}
         activeKey={view}
         onChange={changeView}
         onHome={onClose}
         onSignOut={onSignOut}
-        homeLabel="Fechar"
+        homeLabel="Voltar ao site"
       />
       <div className="ml-auto grid h-dvh max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-1.5rem)] sm:rounded-md lg:grid-cols-[260px_1fr] lg:grid-rows-none">
         <header className="flex items-center gap-3 border-b border-ink/10 bg-white p-3 lg:hidden">
@@ -6876,18 +6876,18 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
           </button>
           <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Portal</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Portal do hóspede</p>
             <h2 className="truncate text-lg font-black">{menu.find(([key]) => key === view)?.[1] || 'Dashboard'}</h2>
             <p className="truncate text-xs font-semibold text-ink/55">{authProfile?.email}</p>
           </div>
-          <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-white" onClick={onClose} aria-label="Fechar portal">
+          <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-white" onClick={onClose} aria-label="Voltar ao site">
             <X size={18} />
           </button>
         </header>
         <aside className="hidden border-b border-ink/10 bg-white p-3 sm:p-4 lg:block lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-3 lg:block">
             <div>
-              <h2 className="text-xl font-black">Portal do cliente</h2>
+              <h2 className="text-xl font-black">Portal do hóspede</h2>
               <p className="mt-1 text-xs font-semibold text-ink/55">{authProfile?.email}</p>
             </div>
             <Button type="button" variant="outline" onClick={onClose} className="lg:hidden">
@@ -6918,7 +6918,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
           <div className="hidden justify-end lg:flex">
             <Button type="button" variant="outline" onClick={onClose}>
               <X size={18} />
-              Fechar
+              Voltar ao site
             </Button>
           </div>
           {view === 'dashboard' ? (
@@ -7457,7 +7457,7 @@ function AdminPanel({
     ['reports', 'Relatórios', 'description'],
     ['clients', 'Clientes', 'groups'],
     ...(normalizeRole(authProfile?.role) === 'proprietario' ? [['suggestions', 'Sugestões', 'forum', unreadOwnerSuggestionCount]] : []),
-    ['admin', 'Dados do administrador', 'person'],
+    ['admin', 'Meu perfil', 'person'],
     ['settings', 'Configurações', 'settings'],
   ];
   const activeAdminMenuLabel = adminMenu.find(([key]) => key === adminView)?.[1] || 'Dashboard';
@@ -7485,6 +7485,13 @@ function AdminPanel({
     : ownerPropertyLimitState.canCreate
       ? `Você ainda pode cadastrar ${ownerRemainingProperties} casa(s).`
       : 'Licença ativa necessária para cadastrar casas.';
+  const propertyAvailabilityNotice = /^Você ainda pode cadastrar \d+ casa\(s\)\.$/i.test(adminNotice || '');
+  const contextualAdminNotice = propertyAvailabilityNotice ? '' : adminNotice;
+  const reservationListRows = adminView === 'confirmations' ? pendingReservations : visibleReservations;
+  const reservationListTitle = adminView === 'confirmations' ? 'Confirmações de reserva' : 'Reservas';
+  const reservationEmptyTitle =
+    adminView === 'confirmations' ? 'Nenhuma solicitação aguardando confirmação.' : 'Nenhuma reserva ativa para esta casa.';
+  const reservationEmptyText = adminView === 'confirmations' ? 'As solicitações pendentes aparecerão aqui.' : '';
 
   useEffect(() => {
     const storedView = readLocalData(uiStateKeys.adminView, '');
@@ -7727,7 +7734,7 @@ function AdminPanel({
         .eq('id', adminSession.user.id);
     }
 
-    setAdminNotice('Dados do administrador salvos.');
+    setAdminNotice('Dados do proprietário salvos.');
   }
 
   async function startNewProperty() {
@@ -8255,7 +8262,7 @@ function AdminPanel({
               <h2 className="text-lg font-black sm:text-2xl">Administração</h2>
               <p className="text-xs text-white/75 sm:text-sm">Acesso temporariamente bloqueado.</p>
             </div>
-            <Button variant="outline" onClick={onClose} aria-label="Fechar painel">
+            <Button variant="outline" onClick={onClose} aria-label="Voltar ao site">
               <X size={18} />
             </Button>
           </div>
@@ -8310,7 +8317,7 @@ function AdminPanel({
         onChange={changeAdminView}
         onHome={onClose}
         onSignOut={onSignOut}
-        homeLabel="Fechar"
+        homeLabel="Voltar ao site"
       />
       <div className="ml-auto flex h-dvh w-full max-w-6xl flex-col overflow-hidden rounded-none bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-2rem)] sm:rounded-md">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/15 bg-leaf px-3 py-3 text-white sm:px-5 sm:py-4">
@@ -8324,7 +8331,7 @@ function AdminPanel({
               <p className="truncate text-xs text-white/75 sm:text-sm">{adminDetails.email || authProfile?.email || adminEmail}</p>
             </div>
           </div>
-          <Button variant="outline" onClick={onClose} aria-label="Fechar painel">
+          <Button variant="outline" onClick={onClose} aria-label="Voltar ao site">
             <X size={18} />
           </Button>
         </div>
@@ -9317,19 +9324,19 @@ function AdminPanel({
             ) : null}
 
             <section className={`${['reservations', 'confirmations'].includes(adminView) ? 'block' : 'hidden'} rounded-md bg-white p-4 shadow-sm`}>
-              <h3 className="text-xl font-black">Reservas</h3>
-              {adminNotice && ['reservations', 'confirmations'].includes(adminView) ? (
+              <h3 className="text-xl font-black">{reservationListTitle}</h3>
+              {contextualAdminNotice && ['reservations', 'confirmations'].includes(adminView) ? (
                 <p
                   className={`mt-3 rounded-md px-3 py-2 text-sm font-bold ${
-                    adminNotice.includes('Não foi possível') ? 'bg-red-50 text-red-700' : 'bg-leaf/10 text-leaf'
+                    contextualAdminNotice.includes('Não foi possível') ? 'bg-red-50 text-red-700' : 'bg-leaf/10 text-leaf'
                   }`}
                 >
-                  {adminNotice}
+                  {contextualAdminNotice}
                 </p>
               ) : null}
               <div className="mt-4 grid gap-3">
-                {visibleReservations.length ? (
-                  visibleReservations.map((reservation) => {
+                {reservationListRows.length ? (
+                  reservationListRows.map((reservation) => {
                     const expanded = expandedReservationId === reservation.id;
                     const isConfirming = confirmingReservationId === reservation.id;
                     const isConfirmSuccess = confirmedReservationId === reservation.id;
@@ -9449,9 +9456,10 @@ function AdminPanel({
                     );
                   })
                 ) : (
-                  <p className="rounded-md bg-white p-4 text-sm font-semibold text-ink/60 shadow-sm">
-                    Nenhuma reserva ativa para esta casa.
-                  </p>
+                  <div className="rounded-md bg-white p-4 text-sm font-semibold text-ink/60 shadow-sm">
+                    <p>{reservationEmptyTitle}</p>
+                    {reservationEmptyText ? <p className="mt-1 text-sm font-medium text-ink/45">{reservationEmptyText}</p> : null}
+                  </div>
                 )}
               </div>
             </section>
@@ -9480,9 +9488,9 @@ function AdminPanel({
               <section className="grid gap-4">
                 <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitAdminDetails}>
                   <div>
-                    <h3 className="text-xl font-black">Dados do administrador</h3>
+                    <h3 className="text-xl font-black">Dados do proprietário</h3>
                     <p className="mt-1 text-sm text-ink/65">
-                      Atualize os dados exibidos no painel e no perfil administrativo.
+                      Atualize os dados exibidos no painel e no seu perfil.
                     </p>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -9521,10 +9529,10 @@ function AdminPanel({
                     dependendo dos administradores autorizados na configuração do site.
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    {adminNotice ? <p className="text-sm font-semibold text-leaf">{adminNotice}</p> : <span />}
+                    {contextualAdminNotice ? <p className="text-sm font-semibold text-leaf">{contextualAdminNotice}</p> : <span />}
                     <Button type="submit">
                       <Save size={18} />
-                      Salvar administrador
+                      Salvar dados
                     </Button>
                   </div>
                 </form>
