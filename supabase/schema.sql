@@ -296,10 +296,14 @@ create table if not exists public.payment_settings (
   bank_document text,
   card_payment_url text,
   max_installments integer not null default 1,
+  interest_rates jsonb not null default '[]'::jsonb,
   payment_instructions text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.payment_settings
+  add column if not exists interest_rates jsonb not null default '[]'::jsonb;
 
 create table if not exists public.licenses (
   id uuid primary key default gen_random_uuid(),
@@ -392,7 +396,8 @@ create table if not exists public.suggestions (
   email text,
   message text not null,
   status text not null default 'new' check (status in ('new', 'read', 'done')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 alter table public.suggestions
@@ -400,6 +405,9 @@ alter table public.suggestions
 
 alter table public.suggestions
   add column if not exists email text;
+
+alter table public.suggestions
+  add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists public.support_tickets (
   id uuid primary key default gen_random_uuid(),
@@ -852,9 +860,14 @@ drop policy if exists "Users can read own vouchers" on public.vouchers;
 drop policy if exists "Admins can manage vouchers" on public.vouchers;
 drop policy if exists "Authenticated users can send suggestions" on public.suggestions;
 drop policy if exists "Admins can read suggestions" on public.suggestions;
+drop policy if exists "Owners and super admins can read suggestions" on public.suggestions;
+drop policy if exists "Owners and super admins can update suggestions" on public.suggestions;
+drop policy if exists "Owners and super admins can delete suggestions" on public.suggestions;
 drop policy if exists "Authenticated users can send support tickets" on public.support_tickets;
 drop policy if exists "Users can read own support tickets" on public.support_tickets;
 drop policy if exists "Super admins can manage support tickets" on public.support_tickets;
+drop policy if exists "Super admins can update support tickets" on public.support_tickets;
+drop policy if exists "Super admins can delete support tickets" on public.support_tickets;
 drop policy if exists "Admins can manage logs" on public.admin_logs;
 drop policy if exists "Public can read interest settings" on public.interest_settings;
 drop policy if exists "Admins can manage interest settings" on public.interest_settings;
@@ -931,10 +944,19 @@ create policy "Public can read unavailable reservation dates"
 
 create policy "Guests can create reservation requests"
   on public.reservations for insert
+  to anon, authenticated
   with check (
     status = 'pending'
     and payment_status = 'pending'
+    and source = 'site'
     and public.is_property_bookable(property_id)
+    and check_in < check_out
+    and total_amount >= 0
+    and guests > 0
+    and installments >= 1
+    and interest_rate >= 0
+    and interest_amount >= 0
+    and (guest_user_id is null or guest_user_id = auth.uid())
   );
 
 create policy "Authenticated owners can manage properties"
@@ -1043,9 +1065,46 @@ create policy "Authenticated users can send suggestions"
   on public.suggestions for insert
   with check (auth.role() = 'authenticated' or user_id is null);
 
-create policy "Admins can read suggestions"
+create policy "Owners and super admins can read suggestions"
   on public.suggestions for select
-  using (public.is_super_admin() or public.is_owner());
+  using (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = suggestions.property_id
+        and properties.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners and super admins can update suggestions"
+  on public.suggestions for update
+  using (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = suggestions.property_id
+        and properties.owner_id = auth.uid()
+    )
+  )
+  with check (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = suggestions.property_id
+        and properties.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners and super admins can delete suggestions"
+  on public.suggestions for delete
+  using (
+    public.is_super_admin()
+    or exists (
+      select 1 from public.properties
+      where properties.id = suggestions.property_id
+        and properties.owner_id = auth.uid()
+    )
+  );
 
 create policy "Authenticated users can send support tickets"
   on public.support_tickets for insert
@@ -1059,6 +1118,15 @@ create policy "Super admins can manage support tickets"
   on public.support_tickets for all
   using (public.is_super_admin())
   with check (public.is_super_admin());
+
+create policy "Super admins can update support tickets"
+  on public.support_tickets for update
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+create policy "Super admins can delete support tickets"
+  on public.support_tickets for delete
+  using (public.is_super_admin());
 
 create policy "Admins can manage logs"
   on public.admin_logs for all

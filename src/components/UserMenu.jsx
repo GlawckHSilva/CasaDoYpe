@@ -15,10 +15,12 @@ export default function UserMenu({
   const [open, setOpen] = useState(false);
   const pendingNotifications = Math.max(0, Number(notificationCount || 0));
   const ThemeIcon = themeMode === 'dark' ? Sun : Moon;
+  const role = String(authProfile?.role || '').toLowerCase();
+  const showSupport = !['hospede', 'guest', 'client'].includes(role);
   const menuItems = [
     ['Meu Perfil', onOpenProfile, User],
     ['Notificações', onOpenNotifications, Bell],
-    ['Suporte', onOpenSupport, Headset],
+    ...(showSupport ? [['Suporte', onOpenSupport, Headset]] : []),
     ['Configurações', onOpenSettings, Settings],
     ['Alternar tema', onToggleTheme, ThemeIcon],
   ];

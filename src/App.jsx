@@ -26,7 +26,6 @@ import {
   ImagePlus,
   Instagram,
   KeyRound,
-  LifeBuoy,
   Lightbulb,
   Link2,
   Lock,
@@ -424,7 +423,15 @@ const placeholderPhoto = {
   alt: 'Sem foto cadastrada',
 };
 
-function PropertyPhotoImage({ src, alt = 'Foto da casa', className = '', ...props }) {
+function PropertyPhotoImage({
+  src,
+  alt = 'Foto da casa',
+  className = '',
+  loading = 'lazy',
+  decoding = 'async',
+  sizes = '(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw',
+  ...props
+}) {
   const [imageFailed, setImageFailed] = useState(!src);
 
   useEffect(() => {
@@ -446,7 +453,18 @@ function PropertyPhotoImage({ src, alt = 'Foto da casa', className = '', ...prop
     );
   }
 
-  return <img className={className} src={src} alt={alt} onError={() => setImageFailed(true)} {...props} />;
+  return (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      loading={loading}
+      decoding={decoding}
+      sizes={sizes}
+      onError={() => setImageFailed(true)}
+      {...props}
+    />
+  );
 }
 
 function toDate(value) {
@@ -975,6 +993,56 @@ function calculateCardInstallment(total, installments, interestRates) {
   };
 }
 
+function clampInstallmentLimit(value, fallback = 1) {
+  const parsed = Number.parseInt(value, 10);
+  const safeFallback = Number.parseInt(fallback, 10) || 1;
+  if (!Number.isFinite(parsed)) return Math.max(1, Math.min(24, safeFallback));
+  return Math.max(1, Math.min(24, parsed));
+}
+
+function parseInterestRates(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeInstallmentRates(rates = [], maxInstallments = 4, fallbackRates = defaultInterestRates) {
+  const fallback = parseInterestRates(fallbackRates);
+  const source = parseInterestRates(rates);
+  const limit = clampInstallmentLimit(maxInstallments, fallback.length || 1);
+  const rateMap = new Map();
+
+  fallback.forEach((item) => {
+    const installment = clampInstallmentLimit(item?.installments, 1);
+    rateMap.set(installment, Number(item?.rate || 0));
+  });
+  source.forEach((item) => {
+    const installment = clampInstallmentLimit(item?.installments, 1);
+    rateMap.set(installment, Number(item?.rate || 0));
+  });
+
+  return Array.from({ length: limit }, (_, index) => {
+    const installments = index + 1;
+    return {
+      installments,
+      rate: Number(rateMap.get(installments) || 0),
+    };
+  });
+}
+
+function getPropertyInstallmentRates(paymentSettings, fallbackRates = defaultInterestRates) {
+  const fallback = parseInterestRates(fallbackRates);
+  const maxInstallments = clampInstallmentLimit(paymentSettings?.max_installments, fallback.length || 1);
+  return normalizeInstallmentRates(paymentSettings?.interest_rates, maxInstallments, fallback);
+}
+
 function getReservationNights(reservation) {
   if (!reservation?.check_in || !reservation?.check_out) return 0;
   return Math.max(0, differenceInCalendarDays(toDate(reservation.check_out), toDate(reservation.check_in)));
@@ -1405,7 +1473,7 @@ function MobilePanelDrawer({
 
 function Field({ label, children }) {
   return (
-    <label className="grid gap-1.5 text-[13px] font-semibold text-ink sm:gap-2 sm:text-sm">
+    <label className="grid gap-1.5 text-[13px] font-semibold text-ink dark:text-white/85 sm:gap-2 sm:text-sm">
       <span>{label}</span>
       {children}
     </label>
@@ -1415,7 +1483,7 @@ function Field({ label, children }) {
 function TextInput({ className = '', ...props }) {
   return (
     <input
-      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-11 sm:text-sm ${className}`}
+      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition placeholder:text-ink/40 dark:border-white/10 dark:bg-slate-950/80 dark:text-white dark:placeholder:text-white/40 sm:min-h-11 sm:text-sm ${className}`}
       {...props}
     />
   );
@@ -1424,7 +1492,7 @@ function TextInput({ className = '', ...props }) {
 function TextArea({ className = '', ...props }) {
   return (
     <textarea
-      className={`form-control min-h-20 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 sm:min-h-24 sm:text-sm ${className}`}
+      className={`form-control min-h-20 rounded-md border border-ink/15 bg-white px-3 py-2 text-base text-ink shadow-sm transition placeholder:text-ink/40 dark:border-white/10 dark:bg-slate-950/80 dark:text-white dark:placeholder:text-white/40 sm:min-h-24 sm:text-sm ${className}`}
       {...props}
     />
   );
@@ -1433,7 +1501,7 @@ function TextArea({ className = '', ...props }) {
 function SelectInput({ children, className = '', ...props }) {
   return (
     <select
-      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition sm:min-h-11 sm:text-sm ${className}`}
+      className={`form-control min-h-10 rounded-md border border-ink/15 bg-white px-3 text-base text-ink shadow-sm transition dark:border-white/10 dark:bg-slate-950/80 dark:text-white sm:min-h-11 sm:text-sm ${className}`}
       {...props}
     >
       {children}
@@ -1588,9 +1656,13 @@ export default function App() {
   }, [booking.check_in, booking.check_out]);
   const subtotal = nights * Number(property.daily_rate || 0);
   const total = subtotal + (nights > 0 ? Number(property.cleaning_fee || 0) : 0);
+  const propertyInstallmentRates = useMemo(
+    () => getPropertyInstallmentRates(propertyPaymentSettings, interestRates),
+    [propertyPaymentSettings, interestRates],
+  );
   const cardQuote = useMemo(
-    () => calculateCardInstallment(total, booking.installments, interestRates),
-    [total, booking.installments, interestRates],
+    () => calculateCardInstallment(total, booking.installments, propertyInstallmentRates),
+    [total, booking.installments, propertyInstallmentRates],
   );
   const finalBookingTotal = booking.payment_method === 'card' ? cardQuote.finalTotal : total;
   const reservationConflict = hasConflict(propertyReservations, booking.check_in, booking.check_out);
@@ -2085,6 +2157,16 @@ export default function App() {
   }, [authProfile]);
 
   useEffect(() => {
+    if (booking.payment_method !== 'card') return;
+    const allowedInstallments = propertyInstallmentRates.map((item) => Number(item.installments));
+    if (!allowedInstallments.length || allowedInstallments.includes(Number(booking.installments))) return;
+    setBooking((current) => ({
+      ...current,
+      installments: allowedInstallments[0] || 1,
+    }));
+  }, [booking.installments, booking.payment_method, propertyInstallmentRates]);
+
+  useEffect(() => {
     if (route !== '/admin' || !authProfile || normalizeRole(authProfile.role) === 'super_admin') return;
     if (!adminProperties.length) return;
     if (!adminProperties.some((item) => item.id === selectedPropertyId)) {
@@ -2107,7 +2189,13 @@ export default function App() {
     const reservation = {
       property_id: property.id,
       guest_user_id: normalizeRole(authProfile?.role) === 'hospede' ? authProfile.id : null,
-      ...booking,
+      guest_name: String(booking.guest_name || '').trim(),
+      guest_email: String(booking.guest_email || '').trim().toLowerCase(),
+      guest_phone: String(booking.guest_phone || '').trim(),
+      guest_document: String(booking.guest_document || '').trim(),
+      check_in: booking.check_in,
+      check_out: booking.check_out,
+      notes: String(booking.notes || '').trim(),
       guests: Number(booking.guests),
       installments: Number(booking.payment_method === 'card' ? booking.installments : 1),
       interest_rate: booking.payment_method === 'card' ? cardQuote.rate : 0,
@@ -2116,6 +2204,7 @@ export default function App() {
       status: 'pending',
       payment_status: 'pending',
       payment_method: booking.payment_method,
+      source: 'site',
     };
 
     let createdReservation = reservation;
@@ -2124,8 +2213,13 @@ export default function App() {
       try {
         createdReservation = await createReservationRecord(supabase, reservation);
         setReservations((current) => [...current, createdReservation]);
-      } catch {
-        setMessage('Não foi possível criar a reserva agora. Confira os dados e tente novamente.');
+      } catch (error) {
+        console.error('createReservation failed', error);
+        const details = String(error?.message || '').toLowerCase();
+        const hint = details.includes('row-level security') || details.includes('permission')
+          ? 'Permissao do Supabase/RLS bloqueou a criacao.'
+          : 'Confira os dados e tente novamente.';
+        setMessage(`Nao foi possivel criar a reserva agora. ${hint}`);
         return;
       }
     } else {
@@ -2638,11 +2732,14 @@ export default function App() {
   }
 
   async function savePaymentSettings(nextSettings) {
+    const maxInstallments = clampInstallmentLimit(nextSettings.max_installments, 1);
+    const normalizedInterestRates = normalizeInstallmentRates(nextSettings.interest_rates, maxInstallments, interestRates);
     const payload = {
       ...nextSettings,
       property_id: property.id,
       owner_id: property.owner_id || (authProfile?.role === 'proprietario' ? authProfile.id : null),
-      max_installments: Number(nextSettings.max_installments || 1),
+      max_installments: maxInstallments,
+      interest_rates: normalizedInterestRates,
     };
     let saved = { ...payload, id: payload.id || crypto.randomUUID() };
     if (hasSupabaseConfig) {
@@ -2988,10 +3085,15 @@ export default function App() {
       >
       <header className="site-header sticky top-0 z-30 border-b backdrop-blur">
         <div className="header-inner mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-          <a href="#inicio" className="header-brand flex min-w-0 items-center gap-3 font-bold">
-            <span className="grid h-10 w-10 place-items-center rounded-md text-white" style={{ background: 'var(--property-accent)' }}>
-              <DoorOpen size={20} />
-            </span>
+          <a
+            href="/"
+            className="header-brand flex min-w-0 items-center gap-3 font-bold"
+            onClick={(event) => {
+              event.preventDefault();
+              navigateTo('/');
+            }}
+          >
+            <BrandLogo variant="mark" className="h-10 w-10 shrink-0 rounded-md shadow-sm" />
             <span className="hidden truncate sm:block">{property.name}</span>
           </a>
           <nav className="hidden items-center gap-6 text-sm font-black md:flex">
@@ -3039,6 +3141,9 @@ export default function App() {
             className="property-fade absolute inset-0 h-full w-full object-cover opacity-70"
             src={heroPhoto?.url}
             alt={heroPhoto?.alt || 'Foto da casa'}
+            loading="eager"
+            fetchPriority="high"
+            sizes="100vw"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-ink/90 via-ink/45 to-transparent" />
           <div className="relative mx-auto grid min-h-[620px] max-w-7xl content-end px-4 pb-12 pt-28 sm:px-6 lg:px-8">
@@ -3194,6 +3299,7 @@ export default function App() {
                     className="h-40 w-full object-cover sm:h-[220px]"
                     src={photo?.url}
                     alt={photo?.alt || `Foto ${index + 1} da casa`}
+                    sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
                   />
                   <div className="flex flex-1 items-center justify-between gap-3 p-3">
                     <span className="min-w-0 truncate text-sm font-bold text-ink/70 dark:text-white/75">
@@ -3227,7 +3333,7 @@ export default function App() {
           <CalendarGrid availability={calendarAvailability} month={month} />
         </section>
 
-        <section id="reserva" className="bg-white py-14 text-ink">
+        <section id="reserva" className="bg-white py-14 text-ink dark:bg-slate-950 dark:text-white">
           <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[1fr_420px] lg:px-8">
             <form className="grid gap-5" onSubmit={createReservation}>
               <div>
@@ -3317,7 +3423,7 @@ export default function App() {
                       value={booking.installments}
                       onChange={(event) => setBooking({ ...booking, installments: Number(event.target.value) })}
                     >
-                      {interestRates.map((item) => (
+                      {propertyInstallmentRates.map((item) => (
                         <option key={item.installments} value={item.installments}>
                           {item.installments}x {Number(item.rate) ? `com ${item.rate}% de juros` : 'sem juros'}
                         </option>
@@ -3586,7 +3692,7 @@ function PublicTopBar({
   const role = normalizeRole(authProfile?.role);
   const linkClass = 'header-link inline-flex items-center gap-2 whitespace-nowrap';
   const openSupport = () => {
-    if (role === 'hospede') onOpenClient?.('support');
+    if (role === 'hospede') onOpenClient?.('reservations');
     else if (role === 'super_admin') onOpenSuperAdmin?.('support');
     else onOpenAdmin?.('settings');
   };
@@ -3714,7 +3820,12 @@ function PropertyCard({ property, photo, onNavigate }) {
     <article className="brand-card brand-card-hover overflow-hidden rounded-md">
       <button type="button" className="block w-full text-left" onClick={() => onNavigate(propertyPath(property))}>
         <div className="relative">
-          <PropertyPhotoImage className="h-40 w-full object-cover sm:h-[220px]" src={photo?.url} alt={photo?.alt || property.name} />
+          <PropertyPhotoImage
+            className="h-40 w-full object-cover sm:h-[220px]"
+            src={photo?.url}
+            alt={photo?.alt || property.name}
+            sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+          />
           <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-black text-ink shadow-sm">
             <Wallet size={14} className="text-leaf" />
             {currency.format(property.daily_rate || 0)}
@@ -3893,7 +4004,14 @@ function MarketingHome({
       />
       <main>
         <section className="relative overflow-hidden bg-ink text-white">
-          <PropertyPhotoImage className="absolute inset-0 h-full w-full object-cover opacity-70" src={heroPhoto.url} alt={heroPhoto.alt || 'Hospedagem'} />
+          <PropertyPhotoImage
+            className="absolute inset-0 h-full w-full object-cover opacity-70"
+            src={heroPhoto.url}
+            alt={heroPhoto.alt || 'Hospedagem'}
+            loading="eager"
+            fetchPriority="high"
+            sizes="100vw"
+          />
           <div className="absolute inset-0 bg-gradient-to-r from-[#020b18] via-[#06162c]/92 to-[#06162c]/20" />
           <div className="relative mx-auto grid min-h-[720px] max-w-7xl content-center px-4 py-16 sm:px-6 lg:px-8">
             <div className="max-w-[620px] lg:w-[45%]">
@@ -6096,8 +6214,13 @@ function SupportTicketsPanel({ rows, setRows }) {
     const previous = rows;
     setRows?.((current) => current.map((item) => (item.id === ticket.id ? { ...item, status: 'read' } : item)));
     if (hasSupabaseConfig) {
-      const { error } = await supabase.from('support_tickets').update({ status: 'read' }).eq('id', ticket.id);
-      if (error) {
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .update({ status: 'read', updated_at: new Date().toISOString() })
+        .eq('id', ticket.id)
+        .select('id')
+        .maybeSingle();
+      if (error || !data) {
         setRows?.(previous);
         setNotice('Não foi possível marcar o chamado como lido.');
       }
@@ -6111,8 +6234,8 @@ function SupportTicketsPanel({ rows, setRows }) {
     const previous = rows;
     setRows?.((current) => current.filter((item) => item.id !== ticket.id));
     if (hasSupabaseConfig) {
-      const { error } = await supabase.from('support_tickets').delete().eq('id', ticket.id);
-      if (error) {
+      const { data, error } = await supabase.from('support_tickets').delete().eq('id', ticket.id).select('id').maybeSingle();
+      if (error || !data) {
         setRows?.(previous);
         setNotice('Não foi possível excluir o chamado.');
       }
@@ -6173,8 +6296,13 @@ function OwnerSuggestionsPanel({ rows, allRows = rows, setRows, properties }) {
     const previous = allRows;
     setRows?.((current) => current.map((item) => (item.id === suggestion.id ? { ...item, status: 'read' } : item)));
     if (hasSupabaseConfig) {
-      const { error } = await supabase.from('suggestions').update({ status: 'read' }).eq('id', suggestion.id);
-      if (error) {
+      const { data, error } = await supabase
+        .from('suggestions')
+        .update({ status: 'read', updated_at: new Date().toISOString() })
+        .eq('id', suggestion.id)
+        .select('id')
+        .maybeSingle();
+      if (error || !data) {
         setRows?.(previous);
         setNotice('Não foi possível marcar a sugestão como lida.');
       }
@@ -6188,8 +6316,8 @@ function OwnerSuggestionsPanel({ rows, allRows = rows, setRows, properties }) {
     const previous = allRows;
     setRows?.((current) => current.filter((item) => item.id !== suggestion.id));
     if (hasSupabaseConfig) {
-      const { error } = await supabase.from('suggestions').delete().eq('id', suggestion.id);
-      if (error) {
+      const { data, error } = await supabase.from('suggestions').delete().eq('id', suggestion.id).select('id').maybeSingle();
+      if (error || !data) {
         setRows?.(previous);
         setNotice('Não foi possível excluir a sugestão.');
       }
@@ -6671,14 +6799,15 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
     .filter((reservation) => reservation.guest_email === authProfile?.email)
     .sort((a, b) => String(b.created_at || b.check_in).localeCompare(String(a.created_at || a.check_in)));
   const currentReservation = clientReservations.find((reservation) => ['pending', 'confirmed'].includes(reservation.status));
-  const [view, setView] = useState(() => readLocalData(uiStateKeys.clientPortalView, initialView || 'dashboard'));
+  const [view, setView] = useState(() => {
+    const storedView = readLocalData(uiStateKeys.clientPortalView, initialView || 'dashboard');
+    return storedView === 'support' ? 'dashboard' : storedView;
+  });
   const [profileDraft, setProfileDraft] = useState({
     full_name: authProfile?.full_name || '',
     phone: authProfile?.phone || '',
   });
   const [profileNotice, setProfileNotice] = useState('');
-  const [supportDraft, setSupportDraft] = useState({ subject: '', category: 'duvida', message: '' });
-  const [supportNotice, setSupportNotice] = useState('');
   const pendingReservations = clientReservations.filter((reservation) => reservation.status === 'pending');
   const confirmedReservations = clientReservations.filter((reservation) => reservation.status === 'confirmed');
   const cancelledReservations = clientReservations.filter((reservation) => reservation.status === 'cancelled');
@@ -6686,7 +6815,6 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   const menu = [
     ['dashboard', 'Dashboard', 'dashboard'],
     ['reservations', 'Minhas reservas', 'calendar_month'],
-    ['support', 'Suporte', 'support_agent'],
     ['settings', 'Configurações', 'settings'],
     ['profile', 'Dados pessoais', 'person'],
     ['status', 'Status atual', 'verified_user'],
@@ -6695,8 +6823,14 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   useEffect(() => {
     const storedView = readLocalData(uiStateKeys.clientPortalView, '');
     const nextView = storedView || initialView || 'dashboard';
-    setView((current) => (current === nextView ? current : nextView));
+    const validView = menu.some(([key]) => key === nextView) ? nextView : 'dashboard';
+    setView((current) => (current === validView ? current : validView));
   }, [initialView]);
+
+  useEffect(() => {
+    if (menu.some(([key]) => key === view)) return;
+    changeView('dashboard');
+  }, [view]);
 
   function changeView(nextView) {
     setView(nextView);
@@ -6708,30 +6842,6 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
     event.preventDefault();
     await onUpdateProfile(profileDraft);
     setProfileNotice('Dados pessoais atualizados.');
-  }
-
-  async function submitSupport(event) {
-    event.preventDefault();
-    setSupportNotice('');
-    const payload = {
-      user_id: authProfile?.id || null,
-      user_email: authProfile?.email || '',
-      name: authProfile?.full_name || '',
-      subject: supportDraft.subject,
-      category: supportDraft.category,
-      message: supportDraft.message,
-      status: 'new',
-    };
-    try {
-      if (hasSupabaseConfig) {
-        const { error } = await supabase.from('support_tickets').insert(payload);
-        if (error) throw error;
-      }
-      setSupportDraft({ subject: '', category: 'duvida', message: '' });
-      setSupportNotice('Suporte enviado com sucesso.');
-    } catch {
-      setSupportNotice('Não foi possível enviar agora. Tente novamente.');
-    }
   }
 
   return (
@@ -6748,7 +6858,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
         onSignOut={onSignOut}
         homeLabel="Fechar"
       />
-      <div className="mx-auto grid h-dvh max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-1.5rem)] sm:rounded-md lg:grid-cols-[260px_1fr] lg:grid-rows-none">
+      <div className="ml-auto grid h-dvh max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-none bg-[#f4f8ff] text-ink shadow-soft sm:h-[calc(100dvh-1.5rem)] sm:rounded-md lg:grid-cols-[260px_1fr] lg:grid-rows-none">
         <header className="flex items-center gap-3 border-b border-ink/10 bg-white p-3 lg:hidden">
           <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-[#f4f8ff]" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
             <Menu size={20} />
@@ -6886,33 +6996,6 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
               ) : (
                 <EmptyState title="Nenhuma solicitação encontrada" text="Suas reservas aparecerão aqui depois da solicitação." />
               )}
-            </div>
-          ) : null}
-          {view === 'support' ? (
-            <div className="grid gap-4">
-              <h3 className="text-2xl font-black">Suporte</h3>
-              <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitSupport}>
-                <Field label="Assunto">
-                  <TextInput value={supportDraft.subject} onChange={(event) => setSupportDraft({ ...supportDraft, subject: event.target.value })} required />
-                </Field>
-                <Field label="Categoria">
-                  <SelectInput value={supportDraft.category} onChange={(event) => setSupportDraft({ ...supportDraft, category: event.target.value })}>
-                    <option value="erro">Erro</option>
-                    <option value="duvida">Dúvida</option>
-                    <option value="sugestao">Sugestão</option>
-                  </SelectInput>
-                </Field>
-                <Field label="Mensagem">
-                  <TextArea value={supportDraft.message} onChange={(event) => setSupportDraft({ ...supportDraft, message: event.target.value })} required />
-                </Field>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  {supportNotice ? <p className="text-sm font-semibold text-leaf">{supportNotice}</p> : <span />}
-                  <Button type="submit">
-                    <LifeBuoy size={18} />
-                    Enviar suporte
-                  </Button>
-                </div>
-              </form>
             </div>
           ) : null}
           {view === 'settings' || view === 'profile' ? (
@@ -7323,6 +7406,7 @@ function AdminPanel({
     bank_document: '',
     card_payment_url: '',
     max_installments: 4,
+    interest_rates: normalizeInstallmentRates(defaultInterestRates, 4, defaultInterestRates),
     payment_instructions: '',
   });
   const [draft, setDraft] = useState({
@@ -7450,10 +7534,11 @@ function AdminPanel({
       bank_document: propertyPaymentSettings?.bank_document || '',
       card_payment_url: propertyPaymentSettings?.card_payment_url || '',
       max_installments: propertyPaymentSettings?.max_installments || 4,
+      interest_rates: getPropertyInstallmentRates(propertyPaymentSettings, interestRates),
       payment_instructions: propertyPaymentSettings?.payment_instructions || '',
       id: propertyPaymentSettings?.id,
     });
-  }, [property, propertyPaymentSettings]);
+  }, [property, propertyPaymentSettings, interestRates]);
 
   useEffect(() => {
     setLicenseDrafts(
@@ -7481,6 +7566,28 @@ function AdminPanel({
       .select('id,email,full_name,phone,role')
       .order('email', { ascending: true });
     if (!error && data) setAdminUsers(data);
+  }
+
+  function updatePaymentMaxInstallments(value) {
+    const maxInstallments = clampInstallmentLimit(value, 1);
+    setPaymentDraft((current) => ({
+      ...current,
+      max_installments: maxInstallments,
+      interest_rates: normalizeInstallmentRates(current.interest_rates, maxInstallments, interestRates),
+    }));
+  }
+
+  function updatePaymentInterestRate(installments, rate) {
+    setPaymentDraft((current) => {
+      const maxInstallments = clampInstallmentLimit(current.max_installments, 1);
+      const normalizedRates = normalizeInstallmentRates(current.interest_rates, maxInstallments, interestRates).map((item) =>
+        Number(item.installments) === Number(installments) ? { ...item, rate: Number(rate || 0) } : item,
+      );
+      return {
+        ...current,
+        interest_rates: normalizedRates,
+      };
+    });
   }
 
   async function updateProfileRole(profile, role) {
@@ -9065,6 +9172,7 @@ function AdminPanel({
                         className="h-40 w-full object-cover sm:h-[220px]"
                         src={item.url}
                         alt={item.alt || 'Foto da casa'}
+                        sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
                       />
                       <div className="flex flex-1 flex-col gap-3 p-3">
                         <div className="min-w-0">
@@ -9591,9 +9699,22 @@ function AdminPanel({
                         type="number"
                         min="1"
                         value={paymentDraft.max_installments}
-                        onChange={(event) => setPaymentDraft({ ...paymentDraft, max_installments: event.target.value })}
+                        onChange={(event) => updatePaymentMaxInstallments(event.target.value)}
                       />
                     </Field>
+                  </div>
+                  <div className="grid gap-3 rounded-md border border-ink/10 bg-white p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+                    {normalizeInstallmentRates(paymentDraft.interest_rates, paymentDraft.max_installments, interestRates).map((item) => (
+                      <Field key={item.installments} label={`${item.installments}x - juros (%)`}>
+                        <TextInput
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.rate}
+                          onChange={(event) => updatePaymentInterestRate(item.installments, event.target.value)}
+                        />
+                      </Field>
+                    ))}
                   </div>
                   <Field label="Instruções de pagamento">
                     <TextArea
