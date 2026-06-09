@@ -20,6 +20,7 @@ import {
   CreditCard,
   DoorOpen,
   Eye,
+  EyeOff,
   FileText,
   Home,
   Headset,
@@ -197,7 +198,7 @@ const amenityIconRules = [
   [/hospede|hóspede|pessoa|grupo/, Users],
   [/diaria|diária|valor|preco|preço/, Wallet],
 ];
-const existingAccountMessage = 'Este email ja esta cadastrado.';
+const existingAccountMessage = 'Este e-mail já está cadastrado.';
 const profilePermissionWarning = 'N\u00e3o foi poss\u00edvel validar suas permiss\u00f5es. Tente recarregar.';
 const authRequestTimeoutMs = 8000;
 const profileRequestTimeoutMs = 3500;
@@ -367,6 +368,9 @@ const messageStatusLabels = {
   resolved: 'Lida',
 };
 
+const defaultThemeColor = '#0a66c2';
+const defaultThemeRgb = [10, 102, 194];
+
 const emptyProperty = {
   id: '',
   name: '',
@@ -381,7 +385,7 @@ const emptyProperty = {
   owner_whatsapp: fallbackOwnerWhatsapp,
   owner_email: fallbackOwnerEmail,
   maps_url: '',
-  theme_color: '#2563eb',
+  theme_color: defaultThemeColor,
   active: true,
   license_key: '',
   license_expires_at: '',
@@ -450,6 +454,7 @@ function PropertyPhotoImage({
   className = '',
   loading = 'lazy',
   decoding = 'async',
+  fetchPriority,
   sizes = '(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw',
   ...props
 }) {
@@ -481,6 +486,7 @@ function PropertyPhotoImage({
       alt={alt}
       loading={loading}
       decoding={decoding}
+      fetchpriority={fetchPriority}
       sizes={sizes}
       onError={() => setImageFailed(true)}
       {...props}
@@ -598,7 +604,7 @@ function normalizeWhatsAppPhone(phone) {
 }
 
 function normalizeHexColor(color) {
-  return /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#2563eb';
+  return /^#[0-9a-f]{6}$/i.test(color || '') ? color : defaultThemeColor;
 }
 
 function normalizeExternalUrl(url) {
@@ -1427,6 +1433,7 @@ function Button({ children, className = '', variant = 'primary', ...props }) {
   const variants = {
     primary: 'btn-primary-theme',
     secondary: 'btn-secondary-theme',
+    destructive: 'btn-destructive-theme',
     ghost:
       'bg-white/90 text-ink shadow-[0_10px_24px_rgba(255,255,255,0.18)] backdrop-blur hover:bg-white',
     outline: 'btn-outline-theme',
@@ -5690,7 +5697,7 @@ function SuperAdminDashboard({
                               <X size={18} aria-hidden="true" />
                               Cancelar
                             </Button>
-                            <Button type="button" variant="secondary" onClick={() => saveLicenseEdit(license)}>
+                            <Button type="button" onClick={() => saveLicenseEdit(license)}>
                               <Save size={18} aria-hidden="true" />
                               Salvar alterações
                             </Button>
@@ -6217,7 +6224,6 @@ function SuperUsersTable({ title, rows, notice, onRoleChange, onDeleteUser }) {
                     <p className="text-xs font-black uppercase tracking-wide text-ink/50">Ações:</p>
                     <Button
                       type="button"
-                      variant="secondary"
                       className="w-full"
                       disabled={!hasRoleChange}
                       onClick={() => onRoleChange(profile, selectedRole)}
@@ -6247,7 +6253,7 @@ function SuperUsersTable({ title, rows, notice, onRoleChange, onDeleteUser }) {
                     <Button
                       key={nextRole}
                       type="button"
-                      variant={role === nextRole ? 'secondary' : 'outline'}
+                      variant={role === nextRole ? 'primary' : 'outline'}
                       className="flex-1 px-2 sm:flex-none sm:px-3"
                       onClick={() => onRoleChange(profile, nextRole)}
                     >
@@ -6534,41 +6540,96 @@ function OwnerSuggestionsPanel({ rows, allRows = rows, setRows, properties }) {
   );
 }
 
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function getFriendlyAuthError(error, mode) {
+  const message = String(error?.message || error?.details || error?.hint || '').toLowerCase();
+  if (/tempo limite/i.test(message)) {
+    return mode === 'signup'
+      ? 'O cadastro demorou demais. Confira sua conexão e tente novamente.'
+      : 'O login demorou demais. Confira sua conexão e tente novamente.';
+  }
+  if (isExistingAccountError(error) || /already|registered|exists|user.*exist|email.*exist/i.test(message)) {
+    return existingAccountMessage;
+  }
+  if (/email not confirmed|not confirmed/i.test(message)) return 'Confirme seu e-mail antes de entrar.';
+  if (/invalid login|invalid.*credential|email.*senha|senha.*email/i.test(message)) return 'E-mail ou senha incorretos.';
+  if (/password|weak/i.test(message)) return 'A senha deve ter pelo menos 6 caracteres.';
+  return mode === 'signup'
+    ? 'Não foi possível criar a conta. Confira os dados e tente novamente.'
+    : 'E-mail ou senha incorretos.';
+}
+
+function PasswordVisibilityField({ id, label, value, onChange, visible, onToggle, autoComplete, disabled = false }) {
+  const Icon = visible ? EyeOff : Eye;
+  return (
+    <div className="grid gap-1.5 text-[13px] font-semibold text-ink sm:gap-2 sm:text-sm">
+      <label htmlFor={id}>{label}</label>
+      <div className="relative">
+        <TextInput
+          id={id}
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={onChange}
+          required
+          minLength={6}
+          autoComplete={autoComplete}
+          disabled={disabled}
+          className="pr-12"
+        />
+        <button
+          type="button"
+          disabled={disabled}
+          className="absolute right-1.5 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-md text-ink/55 transition hover:bg-sky-50 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-white/60 dark:hover:bg-sky-400/15 dark:hover:text-sky-200"
+          onClick={onToggle}
+          aria-label={visible ? `Ocultar ${label.toLowerCase()}` : `Mostrar ${label.toLowerCase()}`}
+        >
+          <Icon size={18} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode = 'login' }) {
   const [mode, setMode] = useState(initialMode);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', phone: '' });
+  const [form, setForm] = useState({ email: '', password: '', confirm_password: '', full_name: '', phone: '' });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const configNotice = !hasSupabaseConfig
     ? supabaseConfig.isPlaceholder
       ? 'As variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY ainda estão com valores de exemplo.'
       : 'Cadastro e login precisam das variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no build.'
     : '';
-  const socialProviders = [
-    ['google', 'Google', 'G'],
-    ['facebook', 'Facebook', 'f'],
-    ['apple', 'Apple', 'A'],
-  ];
+  const isSignup = mode === 'signup';
+  const authTitle = isSignup ? 'Criar conta no Hospedex' : 'Entrar no Hospedex';
+  const authSubtitle = isSignup
+    ? 'Cadastre-se para reservar hospedagens ou gerenciar suas propriedades.'
+    : 'Acesse sua conta para gerenciar reservas, imóveis e hospedagens.';
 
   useEffect(() => {
     setMode(initialMode || 'login');
   }, [initialMode]);
 
-  async function signInWithProvider(provider) {
+  function changeMode(nextMode) {
+    setMode(nextMode);
     setError('');
     setNotice('');
-    if (!hasSupabaseConfig) {
-      setError('Configure o Supabase Auth para usar login social.');
-      return;
-    }
-    const { error: providerError } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-    if (providerError) setError(`Nao foi possivel entrar com ${provider}.`);
+  }
+
+  function validateForm() {
+    const email = form.email.trim();
+    const password = form.password;
+    if (!email || !isValidEmailAddress(email)) return 'Informe um e-mail válido.';
+    if (!password) return 'Informe sua senha para continuar.';
+    if (password.length < 6) return 'A senha deve ter pelo menos 6 caracteres.';
+    if (mode === 'signup' && form.confirm_password !== password) return 'As senhas não conferem.';
+    return '';
   }
 
   async function sendPasswordReset() {
@@ -6580,6 +6641,10 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
     }
     if (!form.email.trim()) {
       setError('Informe o e-mail para receber o link de recuperação.');
+      return;
+    }
+    if (!isValidEmailAddress(form.email)) {
+      setError('Informe um e-mail válido para receber a recuperação de senha.');
       return;
     }
     const { error: resetError } = await safeSupabaseQuery(
@@ -6602,8 +6667,14 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
 
   async function submit(event) {
     event.preventDefault();
+    if (submitting) return;
     setError('');
     setNotice('');
+    const validationMessage = validateForm();
+    if (validationMessage) {
+      setError(validationMessage);
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -6641,18 +6712,12 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
         'Cadastro excedeu o tempo limite. Confira sua conexao e tente novamente.',
       );
       if (signUpError) {
-        if (/tempo limite/i.test(signUpError.message || '')) {
-          setError('O cadastro demorou demais. Confira sua conexao e tente novamente.');
-          return;
-        }
+        const friendlyError = getFriendlyAuthError(signUpError, mode);
+        setError(friendlyError);
         if (isExistingAccountError(signUpError)) {
-          setError(existingAccountMessage);
           setNotice('Entre com sua senha ou clique em Recuperar senha para receber um novo link.');
           setMode('login');
-          return;
         }
-        setError('Não foi possível criar a conta de hóspede. Confira os dados.');
-        setSubmitting(false);
         return;
       }
       if (isExistingAccountResponse(data)) {
@@ -6686,17 +6751,17 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
       'Login excedeu o tempo limite. Confira sua conexao e tente novamente.',
     );
     if (/tempo limite/i.test(signInError?.message || '')) {
-      setError('O login demorou demais. Confira sua conexao e tente novamente.');
+      setError(getFriendlyAuthError(signInError, mode));
       return;
     }
     if (signInError?.message === 'Email not confirmed') {
-      setError('Confirme seu email antes de entrar.');
+      setError('Confirme seu e-mail antes de entrar.');
       setNotice('Verifique sua caixa de entrada e tente novamente.');
       setSubmitting(false);
       return;
     }
     if (signInError || !data?.session) {
-      setError('Email ou senha incorretos.');
+      setError(getFriendlyAuthError(signInError, mode));
       setSubmitting(false);
       return;
     }
@@ -6708,142 +6773,147 @@ function AuthModal({ onClose, onAuthenticated, resolveAuthProfile, initialMode =
     onAuthenticated(profile);
     setSubmitting(false);
     } catch {
-      setError('Nao foi possivel concluir agora. Confira sua conexao e tente novamente.');
+      setError(mode === 'signup'
+        ? 'Não foi possível criar a conta. Confira os dados e tente novamente.'
+        : 'Não foi possível entrar agora. Confira sua conexão e tente novamente.');
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/60 p-2 py-3 backdrop-blur sm:p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/70 p-3 py-5 backdrop-blur sm:p-6">
       <form
-        className="brand-card flex max-h-[calc(100dvh-1rem)] w-[95vw] max-w-md flex-col overflow-hidden rounded-md bg-white text-ink shadow-soft sm:max-h-[90vh] sm:w-full sm:max-w-lg"
+        className="brand-card relative flex max-h-[calc(100dvh-2rem)] w-[min(100%,32rem)] flex-col overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-sky-100/70 dark:bg-slate-900 dark:text-white dark:ring-sky-400/15 sm:max-h-[90vh]"
         onSubmit={submit}
+        noValidate
       >
-        <div className="flex shrink-0 justify-end px-3 pt-3 sm:px-5 sm:pt-5">
+        <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
           <Button type="button" variant="outline" onClick={onClose} aria-label="Fechar login" className="min-h-9 px-3 py-1.5">
             <X size={16} />
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 sm:px-6 sm:pb-4">
-          <div className="grid justify-items-center gap-1.5 text-center sm:gap-2">
-            <BrandLogo variant="vertical" className="h-16 w-16 rounded-xl shadow-sm sm:h-24 sm:w-24 sm:rounded-2xl" />
-            <h2 className="text-lg font-black sm:text-xl">{mode === 'login' ? 'Login' : 'Cadastro'}</h2>
-            <p className="max-w-xs text-[11px] leading-5 text-ink/55 sm:text-xs">
-              {mode === 'login'
-                ? 'Entre para acessar o portal correto da sua conta.'
-                : 'Crie sua conta para acompanhar reservas e solicitações.'}
-            </p>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-6 sm:px-7 sm:pb-6 sm:pt-7">
+          <div className="grid justify-items-center gap-2 text-center">
+            <BrandLogo variant="vertical" className="h-20 w-20 rounded-2xl shadow-sm sm:h-24 sm:w-24" />
+            <div className="mt-1 grid gap-2">
+              <h2 className="text-2xl font-black leading-tight sm:text-3xl">{authTitle}</h2>
+              <p className="max-w-sm text-sm leading-6 text-ink/60 dark:text-white/65">
+                {authSubtitle}
+              </p>
+            </div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-mist p-1 sm:mt-4">
+          <div className="mt-5 grid grid-cols-2 gap-1 rounded-md bg-sky-50 p-1 dark:bg-white/10">
             <button
               type="button"
-              className={`rounded-md px-3 py-2 text-sm font-black sm:py-2.5 ${mode === 'login' ? 'bg-white shadow-sm' : ''}`}
-              onClick={() => {
-                setMode('login');
-                setError('');
-                setNotice('');
-              }}
+              disabled={submitting}
+              className={`min-h-10 rounded-md px-3 py-2 text-sm font-black transition ${
+                mode === 'login' ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20' : 'text-ink/65 hover:bg-white/70 dark:text-white/70 dark:hover:bg-white/10'
+              }`}
+              onClick={() => changeMode('login')}
             >
-              Login
+              Entrar
             </button>
             <button
               type="button"
-              className={`rounded-md px-3 py-2 text-sm font-black sm:py-2.5 ${mode === 'signup' ? 'bg-white shadow-sm' : ''}`}
-              onClick={() => {
-                setMode('signup');
-                setError('');
-                setNotice('');
-              }}
+              disabled={submitting}
+              className={`min-h-10 rounded-md px-3 py-2 text-sm font-black transition ${
+                mode === 'signup' ? 'bg-sky-600 text-white shadow-sm shadow-sky-500/20' : 'text-ink/65 hover:bg-white/70 dark:text-white/70 dark:hover:bg-white/10'
+              }`}
+              onClick={() => changeMode('signup')}
             >
-              Cadastro
+              Criar conta
             </button>
           </div>
           {!hasSupabaseConfig ? (
-            <p className="mt-3 rounded-md bg-amber-50 px-3 py-2.5 text-[13px] font-semibold leading-5 text-amber-800 sm:mt-4 sm:px-4 sm:py-3 sm:text-sm">
+            <p className="mt-4 rounded-md bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-800 dark:bg-amber-400/12 dark:text-amber-100">
               {configNotice}
             </p>
           ) : null}
-          <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-3.5">
-          {mode === 'signup' ? (
-            <div className="grid gap-3 md:grid-cols-2 md:gap-4">
+          <div className="mt-5 grid gap-4">
+            {isSignup ? (
               <Field label="Nome completo">
-                <TextInput value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} required />
+                <TextInput
+                  id="auth-full-name"
+                  value={form.full_name}
+                  onChange={(event) => setForm({ ...form, full_name: event.target.value })}
+                  required
+                  disabled={submitting}
+                  autoComplete="name"
+                />
               </Field>
+            ) : null}
+            {isSignup ? (
               <Field label="Telefone">
-                <TextInput value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+                <TextInput
+                  id="auth-phone"
+                  value={form.phone}
+                  onChange={(event) => setForm({ ...form, phone: event.target.value })}
+                  disabled={submitting}
+                  autoComplete="tel"
+                  inputMode="tel"
+                />
               </Field>
-            </div>
-          ) : null}
-          <Field label="E-mail">
-            <TextInput
-              type="email"
-              value={form.email}
-              onChange={(event) => setForm({ ...form, email: event.target.value })}
-              required
-              autoComplete="username"
-            />
-          </Field>
-          <Field label="Senha">
-            <TextInput
-              type="password"
+            ) : null}
+            <Field label="E-mail">
+              <TextInput
+                id="auth-email"
+                type="email"
+                value={form.email}
+                onChange={(event) => setForm({ ...form, email: event.target.value })}
+                required
+                disabled={submitting}
+                autoComplete="username"
+                inputMode="email"
+              />
+            </Field>
+            <PasswordVisibilityField
+              id="auth-password"
+              label="Senha"
               value={form.password}
               onChange={(event) => setForm({ ...form, password: event.target.value })}
-              required
-              minLength={6}
+              visible={showPassword}
+              onToggle={() => setShowPassword((current) => !current)}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              disabled={submitting}
             />
-          </Field>
-          {mode === 'login' && hasSupabaseConfig ? (
-            <button type="button" className="text-right text-xs font-bold text-leaf" onClick={sendPasswordReset}>
-              Recuperar senha
-            </button>
-          ) : null}
-          {mode === 'login' && hasSupabaseConfig ? (
-            <div className="grid gap-2 pt-1">
-              <div className="flex items-center gap-3 text-xs font-bold uppercase tracking-wide text-ink/40">
-                <span className="h-px flex-1 bg-ink/10" />
-                Ou entre com
-                <span className="h-px flex-1 bg-ink/10" />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {socialProviders.map(([provider, label, mark]) => (
-                  <button
-                    key={provider}
-                    type="button"
-                    className="social-login-button"
-                    onClick={() => signInWithProvider(provider)}
-                    aria-label={`Entrar com ${label}`}
-                    title={label}
-                  >
-                    <span className="social-login-mark">{mark}</span>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+            {isSignup ? (
+              <PasswordVisibilityField
+                id="auth-confirm-password"
+                label="Confirmar senha"
+                value={form.confirm_password}
+                onChange={(event) => setForm({ ...form, confirm_password: event.target.value })}
+                visible={showConfirmPassword}
+                onToggle={() => setShowConfirmPassword((current) => !current)}
+                autoComplete="new-password"
+                disabled={submitting}
+              />
+            ) : null}
+            {mode === 'login' && hasSupabaseConfig ? (
+              <button type="button" className="justify-self-end text-xs font-black text-sky-700 transition hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-200" onClick={sendPasswordReset}>
+                Recuperar senha
+              </button>
+            ) : null}
+          </div>
         </div>
-        </div>
-        <div className="shrink-0 border-t border-ink/10 bg-white/95 p-3 backdrop-blur sm:p-5">
-          {error ? <p className="mb-2 max-h-16 overflow-y-auto text-[13px] font-semibold leading-5 text-red-700 sm:text-sm">{error}</p> : null}
-          {notice ? <p className="mb-2 max-h-16 overflow-y-auto text-[13px] leading-5 text-ink/70 sm:text-sm">{notice}</p> : null}
-          <Button type="submit" className="w-full" disabled={submitting}>
+        <div className="shrink-0 border-t border-ink/10 bg-white/95 p-4 backdrop-blur dark:border-white/10 dark:bg-slate-900/95 sm:p-6">
+          <div className="grid gap-3" aria-live="polite">
+            {error ? <p className="rounded-md bg-red-50 px-3 py-2.5 text-sm font-semibold leading-6 text-red-700 dark:bg-red-400/12 dark:text-red-100">{error}</p> : null}
+            {notice ? <p className="rounded-md bg-sky-50 px-3 py-2.5 text-sm leading-6 text-ink/70 dark:bg-sky-400/12 dark:text-sky-100">{notice}</p> : null}
+          </div>
+          <Button type="submit" className="mt-3 w-full" disabled={submitting} aria-busy={submitting}>
             {mode === 'login' ? <Lock size={18} /> : <UserPlus size={18} />}
-            {submitting ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Cadastrar'}
+            {submitting ? (mode === 'login' ? 'Entrando...' : 'Criando conta...') : mode === 'login' ? 'Entrar' : 'Criar conta'}
           </Button>
-          <p className="mt-2 text-center text-xs text-ink/55">
+          <p className="mt-3 text-center text-xs text-ink/55 dark:text-white/55">
             {mode === 'login' ? 'Não tem conta?' : 'Já tem conta?'}{' '}
             <button
               type="button"
-              className="font-black text-leaf"
-              onClick={() => {
-                setMode(mode === 'login' ? 'signup' : 'login');
-                setError('');
-                setNotice('');
-              }}
+              className="font-black text-sky-700 transition hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-200"
+              disabled={submitting}
+              onClick={() => changeMode(mode === 'login' ? 'signup' : 'login')}
             >
-              {mode === 'login' ? 'Criar cadastro' : 'Entrar'}
+              {mode === 'login' ? 'Criar conta' : 'Entrar'}
             </button>
           </p>
         </div>
@@ -7345,7 +7415,7 @@ function ManualReservationEditor({ reservation, onSave }) {
       <Field label="Observações internas">
         <TextArea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
       </Field>
-      <Button type="submit" variant="secondary">
+      <Button type="submit">
         <Save size={18} />
         Salvar ajuste
       </Button>
@@ -8166,7 +8236,7 @@ function AdminPanel({
     };
 
     function addHeader() {
-      doc.setFillColor(37, 99, 235);
+      doc.setFillColor(...defaultThemeRgb);
       doc.rect(0, 0, 210, 30, 'F');
       doc.setTextColor(255, 255, 255);
       doc.setFont('helvetica', 'bold');
@@ -8441,7 +8511,7 @@ function AdminPanel({
                   <p className="mt-3 text-sm font-bold">Vencimento: {propertyLicense?.expires_at || '-'}</p>
                 </div>
               </div>
-              <Button className="mt-5" type="button" variant="secondary" onClick={onClose}>
+              <Button className="mt-5" type="button" onClick={onClose}>
                 Entendi
               </Button>
             </div>
@@ -8769,7 +8839,7 @@ function AdminPanel({
                     <div className="grid grid-cols-4 gap-2 sm:flex sm:justify-end">
                       <Button
                         type="button"
-                        variant={item.id === property.id && editingPropertyFormOpen ? 'secondary' : 'outline'}
+                        variant={item.id === property.id && editingPropertyFormOpen ? 'primary' : 'outline'}
                         className="h-10 w-10 px-0 sm:w-auto sm:px-3"
                         onClick={() => startEditProperty(item.id)}
                         aria-label={`Editar ${item.name}`}
@@ -8860,14 +8930,14 @@ function AdminPanel({
                     <div className="flex items-center gap-3 rounded-xl border border-ink/15 bg-white px-3 py-2 shadow-sm">
                       <input
                         type="color"
-                        value={newProperty.theme_color || '#2563eb'}
+                        value={newProperty.theme_color || defaultThemeColor}
                         onChange={(event) => setNewProperty({ ...newProperty, theme_color: event.target.value })}
                         className="h-9 w-12 cursor-pointer rounded-md border-0 bg-transparent p-0"
                       />
                       <TextInput
-                        value={newProperty.theme_color || '#2563eb'}
+                        value={newProperty.theme_color || defaultThemeColor}
                         onChange={(event) => setNewProperty({ ...newProperty, theme_color: event.target.value })}
-                        placeholder="#2563eb"
+                        placeholder={defaultThemeColor}
                       />
                     </div>
                   </Field>
@@ -8956,7 +9026,7 @@ function AdminPanel({
                   <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setShowNewProperty(false)}>
                     Cancelar
                   </Button>
-                  <Button type="submit" variant="secondary" className="w-full sm:w-auto">
+                  <Button type="submit" className="w-full sm:w-auto">
                     <DoorOpen size={18} />
                     Cadastrar casa
                   </Button>
@@ -9103,7 +9173,7 @@ function AdminPanel({
                     <TextInput value={cashDraft.description} onChange={(event) => setCashDraft({ ...cashDraft, description: event.target.value })} required />
                   </Field>
                 </div>
-                <Button type="submit" variant="secondary">
+                <Button type="submit">
                   <Plus size={18} />
                   Adicionar movimentação
                 </Button>
@@ -9216,14 +9286,14 @@ function AdminPanel({
                   <div className="flex items-center gap-3 rounded-xl border border-ink/15 bg-white px-3 py-2 shadow-sm">
                     <input
                       type="color"
-                      value={draft.theme_color || '#2563eb'}
+                      value={draft.theme_color || defaultThemeColor}
                       onChange={(event) => setDraft({ ...draft, theme_color: event.target.value })}
                       className="h-9 w-12 cursor-pointer rounded-md border-0 bg-transparent p-0"
                     />
                     <TextInput
-                      value={draft.theme_color || '#2563eb'}
+                      value={draft.theme_color || defaultThemeColor}
                       onChange={(event) => setDraft({ ...draft, theme_color: event.target.value })}
-                      placeholder="#2563eb"
+                      placeholder={defaultThemeColor}
                     />
                   </div>
                 </Field>
@@ -9338,7 +9408,7 @@ function AdminPanel({
                   placeholder="Foto 1, sala, quarto, fachada..."
                 />
               </Field>
-              <Button type="submit" variant="secondary">
+              <Button type="submit">
                 <ImagePlus size={18} />
                 Adicionar por URL
               </Button>
@@ -9501,7 +9571,7 @@ function AdminPanel({
                   <Button type="button" variant="outline" onClick={() => setManualReservationOpen(false)}>
                     Cancelar
                   </Button>
-                  <Button type="submit" variant="secondary">
+                  <Button type="submit">
                     <CalendarDays size={18} />
                     Criar reserva manual
                   </Button>
@@ -9605,7 +9675,6 @@ function AdminPanel({
                         )}
                         {reservation.payment_status !== 'paid' ? (
                           <Button
-                            variant="secondary"
                             onClick={(event) => {
                               event.stopPropagation();
                               registerPayment(reservation, 'paid');
@@ -9767,14 +9836,14 @@ function AdminPanel({
                           <div className="flex flex-wrap gap-2 sm:justify-end">
                             <Button
                               type="button"
-                              variant={normalizeRole(profile.role) === 'proprietario' ? 'secondary' : 'outline'}
+                              variant={normalizeRole(profile.role) === 'proprietario' ? 'primary' : 'outline'}
                               onClick={() => updateProfileRole(profile, 'proprietario')}
                             >
                               Proprietário
                             </Button>
                             <Button
                               type="button"
-                              variant={normalizeRole(profile.role) === 'hospede' ? 'secondary' : 'outline'}
+                              variant={normalizeRole(profile.role) === 'hospede' ? 'primary' : 'outline'}
                               onClick={() => updateProfileRole(profile, 'hospede')}
                             >
                               Hóspede
@@ -9965,7 +10034,7 @@ function AdminPanel({
                   </section>
 
                   <div className="flex justify-end">
-                    <Button type="submit" variant="secondary" className="w-full sm:w-auto">
+                    <Button type="submit" className="w-full sm:w-auto">
                       <Save size={18} />
                       Salvar dados financeiros
                     </Button>
@@ -9989,7 +10058,7 @@ function AdminPanel({
                     <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setCancelTarget(null)}>
                       Voltar
                     </Button>
-                    <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={confirmCancellation}>
+                    <Button type="button" variant="destructive" className="w-full sm:w-auto" onClick={confirmCancellation}>
                       Confirmar cancelamento
                     </Button>
                   </div>

@@ -36,7 +36,7 @@ export default class ErrorBoundary extends React.Component {
           </p>
           <button
             type="button"
-            className="mt-5 inline-flex min-h-11 items-center justify-center rounded-md bg-[#0a66c2] px-5 py-2.5 text-sm font-bold text-white"
+            className="btn-primary-theme mt-5 inline-flex min-h-11 items-center justify-center rounded-md px-5 py-2.5 text-sm font-bold"
             onClick={() => {
               window.location.href = '/';
             }}

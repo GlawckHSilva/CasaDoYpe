@@ -9,10 +9,10 @@ export default {
       },
       colors: {
         ink: '#142033',
-        leaf: '#2563eb',
-        coral: '#0ea5e9',
+        leaf: 'rgb(var(--primary-rgb) / <alpha-value>)',
+        coral: 'rgb(var(--accent-rgb) / <alpha-value>)',
         mist: '#eaf3ff',
-        sun: '#93c5fd',
+        sun: 'rgb(var(--primary-hover-rgb) / <alpha-value>)',
       },
       boxShadow: {
         soft: '0 18px 45px rgba(20, 32, 51, 0.12)',
