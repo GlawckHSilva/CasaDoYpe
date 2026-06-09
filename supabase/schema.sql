@@ -30,6 +30,7 @@ create table if not exists public.profiles (
   email text not null unique,
   full_name text,
   phone text,
+  avatar_url text,
   role text not null default 'hospede' check (role in ('super_admin', 'proprietario', 'hospede')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -42,12 +43,13 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, full_name, phone, role)
+  insert into public.profiles (id, email, full_name, phone, avatar_url, role)
   values (
     new.id,
     coalesce(new.email, ''),
     new.raw_user_meta_data ->> 'full_name',
     new.raw_user_meta_data ->> 'phone',
+    new.raw_user_meta_data ->> 'avatar_url',
     case
       when lower(coalesce(new.email, '')) = lower('glawcksilva55@gmail.com') then 'super_admin'
       when lower(coalesce(new.email, '')) = lower('glawcksilva8@gmail.com') then 'proprietario'
@@ -58,6 +60,7 @@ begin
     set email = excluded.email,
         full_name = coalesce(public.profiles.full_name, excluded.full_name),
         phone = coalesce(public.profiles.phone, excluded.phone),
+        avatar_url = coalesce(public.profiles.avatar_url, excluded.avatar_url),
         role = case
           when lower(excluded.email) = lower('glawcksilva55@gmail.com') then 'super_admin'
           when lower(excluded.email) = lower('glawcksilva8@gmail.com') and public.profiles.role = 'hospede' then 'proprietario'
@@ -445,6 +448,19 @@ on conflict (installments) do nothing;
 insert into storage.buckets (id, name, public)
 values ('property-photos', 'property-photos', true)
 on conflict (id) do update set public = true;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'profile-avatars',
+  'profile-avatars',
+  true,
+  2097152,
+  array['image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 alter table public.properties enable row level security;
 alter table public.profiles enable row level security;
@@ -882,6 +898,10 @@ drop policy if exists "Public can read property photo files" on storage.objects;
 drop policy if exists "Admins can upload property photo files" on storage.objects;
 drop policy if exists "Admins can update property photo files" on storage.objects;
 drop policy if exists "Admins can delete property photo files" on storage.objects;
+drop policy if exists "Public can read profile avatar files" on storage.objects;
+drop policy if exists "Users can upload own profile avatar files" on storage.objects;
+drop policy if exists "Users can update own profile avatar files" on storage.objects;
+drop policy if exists "Users can delete own profile avatar files" on storage.objects;
 
 create policy "Public can read property photo files"
   on storage.objects for select
@@ -899,6 +919,38 @@ create policy "Admins can update property photo files"
 create policy "Admins can delete property photo files"
   on storage.objects for delete
   using (bucket_id = 'property-photos' and public.is_admin());
+
+create policy "Public can read profile avatar files"
+  on storage.objects for select
+  using (bucket_id = 'profile-avatars');
+
+create policy "Users can upload own profile avatar files"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'profile-avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+create policy "Users can update own profile avatar files"
+  on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'profile-avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'profile-avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+create policy "Users can delete own profile avatar files"
+  on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'profile-avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 create policy "Public can read properties"
   on public.properties for select

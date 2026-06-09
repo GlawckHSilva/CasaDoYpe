@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Bell, Headset, LogOut, Moon, Settings, Sun, User } from 'lucide-react';
+import UserAvatar from './UserAvatar.jsx';
 
 export default function UserMenu({
   authProfile,
@@ -39,7 +40,7 @@ export default function UserMenu({
         aria-label="Abrir menu do usuário"
         title="Perfil"
       >
-        <User size={19} />
+        <UserAvatar profile={authProfile} size="xs" className="border-0 bg-transparent shadow-none" />
         {pendingNotifications > 0 ? (
           <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-black leading-none text-white ring-2 ring-white dark:ring-slate-950">
             {pendingNotifications > 9 ? '9+' : pendingNotifications}
@@ -49,9 +50,12 @@ export default function UserMenu({
 
       {open ? (
         <div className="absolute right-0 top-full mt-2 w-[min(18rem,calc(100vw-1rem))] overflow-hidden rounded-md bg-white text-ink shadow-soft ring-1 ring-ink/10 dark:bg-slate-900 dark:text-white dark:ring-white/10">
-          <div className="border-b border-ink/10 px-4 py-3 text-sm dark:border-white/10">
-            <p className="font-black">{authProfile?.full_name || 'Usuário'}</p>
-            <p className="truncate text-xs text-ink/55 dark:text-white/55">{authProfile?.email}</p>
+          <div className="flex items-center gap-3 border-b border-ink/10 px-4 py-3 text-sm dark:border-white/10">
+            <UserAvatar profile={authProfile} size="sm" />
+            <div className="min-w-0">
+              <p className="truncate font-black">{authProfile?.full_name || 'Usuário'}</p>
+              <p className="truncate text-xs text-ink/55 dark:text-white/55">{authProfile?.email}</p>
+            </div>
           </div>
 
           {menuItems.map(([label, action, Icon]) => (

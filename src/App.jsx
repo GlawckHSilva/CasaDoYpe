@@ -84,6 +84,7 @@ import { createReservationRecord } from './services/reservationService.js';
 import { deleteLicenseRecord, getOwnerPanelAccessState, getOwnerPropertyLimitState, upsertLicenseRecord } from './services/licenseService.js';
 import NavbarShell from './components/Navbar.jsx';
 import UserMenu from './components/UserMenu.jsx';
+import UserAvatar from './components/UserAvatar.jsx';
 import HomePage from './pages/Home.jsx';
 import CasasPage from './pages/Casas.jsx';
 import CasaDetalhePage from './pages/CasaDetalhe.jsx';
@@ -100,6 +101,9 @@ const currency = new Intl.NumberFormat('pt-BR', {
 const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'glawcksilva8@gmail.com';
 const superAdminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'glawcksilva55@gmail.com';
 const commercialEmail = import.meta.env.VITE_COMMERCIAL_EMAIL || 'hospedex1@gmail.com';
+const profileAvatarBucket = 'profile-avatars';
+const profileAvatarMaxSize = 2 * 1024 * 1024;
+const profileAvatarMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const adminEmailAliases = (import.meta.env.VITE_ADMIN_EMAIL_ALIASES || '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
@@ -980,6 +984,176 @@ function fileToDataUrl(file) {
   });
 }
 
+function getProfileAvatarExtension(file) {
+  if (file.type === 'image/png') return 'png';
+  if (file.type === 'image/webp') return 'webp';
+  return 'jpg';
+}
+
+function getProfileAvatarStoragePath(avatarUrl, userId) {
+  const value = String(avatarUrl || '').trim();
+  if (!value) return '';
+  if (userId && value.startsWith(`${userId}/`)) return value;
+  const marker = `/storage/v1/object/public/${profileAvatarBucket}/`;
+  const markerIndex = value.indexOf(marker);
+  if (markerIndex === -1) return '';
+  const pathWithQuery = value.slice(markerIndex + marker.length);
+  try {
+    return decodeURIComponent(pathWithQuery.split('?')[0]);
+  } catch {
+    return pathWithQuery.split('?')[0];
+  }
+}
+
+async function removeProfileAvatarFile(avatarUrl, userId) {
+  if (!hasSupabaseConfig || !avatarUrl || !userId) return;
+  const storagePath = getProfileAvatarStoragePath(avatarUrl, userId);
+  if (!storagePath || !storagePath.startsWith(`${userId}/`)) return;
+  await supabase.storage.from(profileAvatarBucket).remove([storagePath]);
+}
+
+async function uploadProfileAvatarFile(file, userId, currentAvatarUrl = '') {
+  if (!hasSupabaseConfig) {
+    throw new Error('Supabase nao configurado para salvar foto.');
+  }
+  if (!userId) {
+    throw new Error('Sessao nao encontrada para salvar foto.');
+  }
+  if (!profileAvatarMimeTypes.has(file.type)) {
+    throw new Error('Escolha uma imagem JPG, PNG ou WEBP.');
+  }
+  if (file.size > profileAvatarMaxSize) {
+    throw new Error('A foto deve ter no maximo 2MB.');
+  }
+
+  const extension = getProfileAvatarExtension(file);
+  const storagePath = `${userId}/avatar.${extension}`;
+  const currentStoragePath = getProfileAvatarStoragePath(currentAvatarUrl, userId);
+  if (currentStoragePath && currentStoragePath !== storagePath) {
+    await supabase.storage.from(profileAvatarBucket).remove([currentStoragePath]);
+  }
+
+  const { error } = await supabase.storage.from(profileAvatarBucket).upload(storagePath, file, {
+    cacheControl: '3600',
+    contentType: file.type,
+    upsert: true,
+  });
+  if (error) {
+    throw new Error(error.message || 'Nao foi possivel enviar a foto agora.');
+  }
+
+  const { data } = supabase.storage.from(profileAvatarBucket).getPublicUrl(storagePath);
+  return `${data.publicUrl}?v=${Date.now()}`;
+}
+
+function ProfilePhotoField({ value = '', onChange, userId, name, email, compact = false }) {
+  const [localPreview, setLocalPreview] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const inputId = useMemo(() => `profile-avatar-${userId || 'user'}-${Math.random().toString(36).slice(2)}`, [userId]);
+  const visibleAvatar = localPreview || value;
+
+  useEffect(() => {
+    return () => {
+      if (localPreview) URL.revokeObjectURL(localPreview);
+    };
+  }, [localPreview]);
+
+  async function handleFileChange(event) {
+    const file = Array.from(event.target.files || [])[0];
+    event.target.value = '';
+    if (!file) return;
+    setError('');
+
+    if (!profileAvatarMimeTypes.has(file.type)) {
+      setError('Escolha uma imagem JPG, PNG ou WEBP.');
+      return;
+    }
+    if (file.size > profileAvatarMaxSize) {
+      setError('A foto deve ter no maximo 2MB.');
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setLocalPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return previewUrl;
+    });
+    setUploading(true);
+    try {
+      const uploadedUrl = await uploadProfileAvatarFile(file, userId, value);
+      onChange?.(uploadedUrl);
+      setLocalPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return '';
+      });
+    } catch (avatarError) {
+      setLocalPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return '';
+      });
+      setError(avatarError.message || 'Nao foi possivel enviar a foto agora.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeAvatar() {
+    setError('');
+    setUploading(true);
+    try {
+      await removeProfileAvatarFile(value, userId);
+      onChange?.('');
+      setLocalPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return '';
+      });
+    } catch {
+      setError('Nao foi possivel remover a foto agora.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className={`rounded-md border border-ink/10 bg-[#f8fbff] p-4 dark:border-white/10 dark:bg-slate-900/60 ${compact ? '' : 'sm:flex sm:items-center sm:justify-between sm:gap-4'}`}>
+      <div className="flex items-center gap-4">
+        <UserAvatar src={visibleAvatar} name={name} email={email} size={compact ? 'lg' : 'xl'} />
+        <div>
+          <p className="font-black">Foto de perfil</p>
+          <p className="mt-1 text-sm leading-6 text-ink/60 dark:text-white/60">
+            Use JPG, PNG ou WEBP com ate 2MB.
+          </p>
+          {error ? <p className="mt-2 text-sm font-bold text-red-700 dark:text-red-300">{error}</p> : null}
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2 sm:mt-0 sm:justify-end">
+        <input
+          id={inputId}
+          type="file"
+          className="sr-only"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={handleFileChange}
+          disabled={uploading}
+        />
+        <label
+          htmlFor={inputId}
+          className={`inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md bg-leaf px-4 text-sm font-black text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-leaf/90 ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+        >
+          <ImagePlus size={17} aria-hidden="true" />
+          {uploading ? 'Enviando...' : 'Alterar foto'}
+        </label>
+        {value || localPreview ? (
+          <Button type="button" variant="outline" onClick={removeAvatar} disabled={uploading}>
+            <Trash2 size={17} />
+            Remover foto
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function parseAdminList(value) {
   return String(value || '')
     .split(/\n|,/)
@@ -1460,15 +1634,19 @@ function MobilePanelDrawer({
   onHome,
   onSignOut,
   homeLabel = 'Site',
+  avatarProfile = null,
 }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[80] bg-ink/55 backdrop-blur-sm lg:hidden">
       <div className="h-full w-[min(86vw,20rem)] overflow-y-auto bg-white p-3 text-ink shadow-soft dark:bg-slate-950 dark:text-white">
         <div className="flex items-start justify-between gap-3 rounded-md bg-ink p-3 text-white">
-          <div className="min-w-0">
-            <p className="font-black">{title}</p>
-            {subtitle ? <p className="mt-1 truncate text-xs text-white/65">{subtitle}</p> : null}
+          <div className="flex min-w-0 items-center gap-3">
+            {avatarProfile ? <UserAvatar profile={avatarProfile} size="sm" /> : null}
+            <div className="min-w-0">
+              <p className="font-black">{title}</p>
+              {subtitle ? <p className="mt-1 truncate text-xs text-white/65">{subtitle}</p> : null}
+            </div>
           </div>
           <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-white/10" onClick={onClose} aria-label="Fechar menu">
             <X size={18} />
@@ -1822,6 +2000,7 @@ export default function App() {
       email: session.user.email,
       full_name: previousProfile?.full_name || session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
       phone: previousProfile?.phone || session.user.user_metadata?.phone || '',
+      avatar_url: previousProfile?.avatar_url || session.user.user_metadata?.avatar_url || '',
       role: previousProfile?.role || emailRole || '',
     };
 
@@ -2292,28 +2471,41 @@ export default function App() {
   }
 
   async function updateClientProfile(updates) {
-    if (!authProfile?.id) return;
+    if (!authProfile?.id) return false;
+    const previousProfile = authProfile;
     const nextProfile = { ...authProfile, ...updates };
     setAuthProfile(nextProfile);
+    authProfileRef.current = nextProfile;
+    setProfiles((current) => current.map((item) => (item.id === authProfile.id ? { ...item, ...nextProfile } : item)));
     if (hasSupabaseConfig) {
       try {
-        await supabase
+        const profilePayload = {
+          full_name: nextProfile.full_name,
+          phone: nextProfile.phone,
+          avatar_url: nextProfile.avatar_url || null,
+        };
+        const { error: profileError } = await supabase
           .from('profiles')
-          .update({
-            full_name: nextProfile.full_name,
-            phone: nextProfile.phone,
-          })
+          .update(profilePayload)
           .eq('id', authProfile.id);
-        await supabase.auth.updateUser({
+        if (profileError) throw profileError;
+
+        const { error: authError } = await supabase.auth.updateUser({
           data: {
             full_name: nextProfile.full_name,
             phone: nextProfile.phone,
+            avatar_url: nextProfile.avatar_url || '',
           },
         });
+        if (authError) throw authError;
       } catch {
-        setAuthProfile(authProfile);
+        setAuthProfile(previousProfile);
+        authProfileRef.current = previousProfile;
+        setProfiles((current) => current.map((item) => (item.id === previousProfile.id ? previousProfile : item)));
+        return false;
       }
     }
+    return true;
   }
 
   async function createPaymentLink(reservation) {
@@ -2969,6 +3161,7 @@ export default function App() {
             setProfiles={setProfiles}
             setProperties={setProperties}
             authProfile={authProfile}
+            onUpdateProfile={updateClientProfile}
             supportTickets={supportTickets}
             setSupportTickets={setSupportTickets}
             adminLogs={adminLogs}
@@ -3203,7 +3396,7 @@ export default function App() {
             src={heroPhoto?.url}
             alt={heroPhoto?.alt || 'Foto da casa'}
             loading="eager"
-            fetchPriority="high"
+            fetchpriority="high"
             sizes="100vw"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-ink/90 via-ink/45 to-transparent" />
@@ -3697,6 +3890,7 @@ export default function App() {
             setSuggestions={setSuggestions}
             adminLogs={adminLogs}
             authProfile={authProfile}
+            onUpdateProfile={updateClientProfile}
             onSignOut={signOut}
             addAdminLog={addAdminLog}
             createManualReservation={createManualReservation}
@@ -4116,7 +4310,7 @@ function MarketingHome({
             src={heroPhoto.url}
             alt={heroPhoto.alt || 'Hospedagem'}
             loading="eager"
-            fetchPriority="high"
+            fetchpriority="high"
             sizes="100vw"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-[#020b18] via-[#06162c]/92 to-[#06162c]/20" />
@@ -4791,6 +4985,7 @@ function SuperAdminDashboard({
   setProfiles,
   setProperties,
   authProfile,
+  onUpdateProfile,
   supportTickets,
   setSupportTickets,
   adminLogs = [],
@@ -4825,6 +5020,12 @@ function SuperAdminDashboard({
     active: true,
     is_primary: false,
   });
+  const [superAdminProfileDraft, setSuperAdminProfileDraft] = useState({
+    full_name: authProfile?.full_name || 'Super Admin',
+    phone: authProfile?.phone || '',
+    avatar_url: authProfile?.avatar_url || '',
+  });
+  const [superAdminProfileNotice, setSuperAdminProfileNotice] = useState('');
 
   useEffect(() => {
     const storedView = readLocalData(uiStateKeys.superAdminView, '');
@@ -4836,11 +5037,31 @@ function SuperAdminDashboard({
     setView((current) => (current === nextView ? current : nextView));
   }, [initialView]);
 
+  useEffect(() => {
+    setSuperAdminProfileDraft((current) => ({
+      ...current,
+      full_name: current.full_name || authProfile?.full_name || 'Super Admin',
+      phone: current.phone || authProfile?.phone || '',
+      avatar_url: authProfile?.avatar_url || current.avatar_url || '',
+    }));
+  }, [authProfile?.id, authProfile?.avatar_url, authProfile?.full_name, authProfile?.phone]);
+
   function changeView(nextView) {
     const normalizedView = normalizeSuperAdminView(nextView);
     setView(normalizedView);
     writeLocalData(uiStateKeys.superAdminView, normalizedView);
     setMobileMenuOpen(false);
+  }
+
+  async function submitSuperAdminProfile(event) {
+    event.preventDefault();
+    setSuperAdminProfileNotice('');
+    const saved = await onUpdateProfile?.({
+      full_name: superAdminProfileDraft.full_name || 'Super Admin',
+      phone: superAdminProfileDraft.phone || '',
+      avatar_url: superAdminProfileDraft.avatar_url || '',
+    });
+    setSuperAdminProfileNotice(saved === false ? 'Nao foi possivel salvar o perfil agora.' : 'Perfil atualizado.');
   }
 
   const owners = profiles.filter((profile) => normalizeRole(profile.role) === 'proprietario');
@@ -5359,6 +5580,7 @@ function SuperAdminDashboard({
         onClose={() => setMobileMenuOpen(false)}
         title="Super Admin"
         subtitle={authProfile?.email}
+        avatarProfile={{ ...authProfile, avatar_url: superAdminProfileDraft.avatar_url || authProfile?.avatar_url }}
         menu={menu}
         activeKey={view}
         onChange={changeView}
@@ -5368,9 +5590,9 @@ function SuperAdminDashboard({
       <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
         <aside className="hidden border-b border-ink/10 bg-white p-3 sm:p-4 lg:block lg:border-b-0 lg:border-r">
           <div className="flex items-center gap-3 rounded-md bg-ink p-3 text-white sm:p-4">
-            <ShieldCheck size={24} className="sm:h-7 sm:w-7" />
-            <div>
-              <p className="font-black">Super Admin</p>
+            <UserAvatar profile={{ ...authProfile, avatar_url: superAdminProfileDraft.avatar_url || authProfile?.avatar_url }} size="md" />
+            <div className="min-w-0">
+              <p className="truncate font-black">{authProfile?.full_name || 'Super Admin'}</p>
               <p className="max-w-[240px] truncate text-xs text-white/65">{authProfile?.email}</p>
             </div>
           </div>
@@ -5405,7 +5627,7 @@ function SuperAdminDashboard({
               <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-[#f4f8ff] lg:hidden" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
                 <Menu size={20} />
               </button>
-              <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm lg:hidden" />
+              <UserAvatar profile={{ ...authProfile, avatar_url: superAdminProfileDraft.avatar_url || authProfile?.avatar_url }} size="sm" className="lg:hidden" />
               <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wide text-ink/50">HospedeX</p>
               <h1 className="truncate text-xl font-black sm:text-2xl">{view === 'dashboard' ? 'Gestão total do sistema' : activeMenuLabel}</h1>
@@ -5790,6 +6012,46 @@ function SuperAdminDashboard({
                   Controle os pontos sensíveis do Hospedex em blocos separados para segurança, ambiente, contato e auditoria.
                 </p>
               </div>
+
+              <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitSuperAdminProfile}>
+                <div>
+                  <h3 className="text-xl font-black">Meu perfil</h3>
+                  <p className="mt-1 text-sm text-ink/65">Atualize sua foto e os dados exibidos no painel.</p>
+                </div>
+                <ProfilePhotoField
+                  value={superAdminProfileDraft.avatar_url}
+                  userId={authProfile?.id}
+                  name={superAdminProfileDraft.full_name || authProfile?.full_name}
+                  email={authProfile?.email}
+                  onChange={(avatar_url) => setSuperAdminProfileDraft((current) => ({ ...current, avatar_url }))}
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Nome">
+                    <TextInput
+                      value={superAdminProfileDraft.full_name}
+                      onChange={(event) => setSuperAdminProfileDraft((current) => ({ ...current, full_name: event.target.value }))}
+                      placeholder="Super Admin"
+                    />
+                  </Field>
+                  <Field label="Telefone">
+                    <TextInput
+                      value={superAdminProfileDraft.phone}
+                      onChange={(event) => setSuperAdminProfileDraft((current) => ({ ...current, phone: event.target.value }))}
+                      placeholder="(00) 00000-0000"
+                    />
+                  </Field>
+                </div>
+                <div className="rounded-md bg-[#f4f8ff] p-3 text-sm text-ink/70">
+                  <strong>E-mail:</strong> {authProfile?.email || '-'}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {superAdminProfileNotice ? <p className="text-sm font-semibold text-leaf">{superAdminProfileNotice}</p> : <span />}
+                  <Button type="submit">
+                    <Save size={18} />
+                    Salvar perfil
+                  </Button>
+                </div>
+              </form>
 
               <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
                 {[
@@ -6196,12 +6458,15 @@ function SuperUsersTable({ title, rows, notice, onRoleChange, onDeleteUser }) {
             const hasRoleChange = selectedRole !== role;
             return (
               <div key={profileKey} className="grid min-w-0 gap-3 rounded-md border border-ink/10 bg-[#f8fbff] p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                <div className="min-w-0">
-                  <p className="break-words font-black">{profile.full_name || profile.email}</p>
-                  <p className="break-all text-sm font-semibold text-ink/65">{profile.email}</p>
-                  <p className="mt-1 text-xs font-black uppercase tracking-wide text-ink/50">
-                    {roleLabels[role] || role || 'Sem role'}
-                  </p>
+                <div className="flex min-w-0 items-center gap-3">
+                  <UserAvatar profile={profile} size="md" />
+                  <div className="min-w-0">
+                    <p className="break-words font-black">{profile.full_name || profile.email}</p>
+                    <p className="break-all text-sm font-semibold text-ink/65">{profile.email}</p>
+                    <p className="mt-1 text-xs font-black uppercase tracking-wide text-ink/50">
+                      {roleLabels[role] || role || 'Sem role'}
+                    </p>
+                  </div>
                 </div>
                 <div className="grid min-w-0 gap-3 rounded-md bg-white/75 p-3 shadow-sm ring-1 ring-ink/5 sm:hidden">
                   <Field label="Perfil:">
@@ -7042,6 +7307,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
   const [profileDraft, setProfileDraft] = useState({
     full_name: authProfile?.full_name || '',
     phone: authProfile?.phone || '',
+    avatar_url: authProfile?.avatar_url || '',
   });
   const [profileNotice, setProfileNotice] = useState('');
   const pendingReservations = clientReservations.filter((reservation) => reservation.status === 'pending');
@@ -7068,6 +7334,15 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
     changeView('dashboard');
   }, [view]);
 
+  useEffect(() => {
+    setProfileDraft((current) => ({
+      ...current,
+      full_name: current.full_name || authProfile?.full_name || '',
+      phone: current.phone || authProfile?.phone || '',
+      avatar_url: authProfile?.avatar_url || current.avatar_url || '',
+    }));
+  }, [authProfile?.id, authProfile?.avatar_url, authProfile?.full_name, authProfile?.phone]);
+
   function changeView(nextView) {
     setView(nextView);
     writeLocalData(uiStateKeys.clientPortalView, nextView);
@@ -7076,8 +7351,8 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
 
   async function submitProfile(event) {
     event.preventDefault();
-    await onUpdateProfile(profileDraft);
-    setProfileNotice('Dados pessoais atualizados.');
+    const saved = await onUpdateProfile(profileDraft);
+    setProfileNotice(saved === false ? 'Nao foi possivel salvar seus dados agora.' : 'Dados pessoais atualizados.');
   }
 
   return (
@@ -7087,6 +7362,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
         onClose={() => setMobileMenuOpen(false)}
         title="Portal do hóspede"
         subtitle={authProfile?.email}
+        avatarProfile={{ ...authProfile, avatar_url: profileDraft.avatar_url || authProfile?.avatar_url }}
         menu={menu}
         activeKey={view}
         onChange={changeView}
@@ -7099,7 +7375,7 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
           <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-ink/10 bg-[#f4f8ff]" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
             <Menu size={20} />
           </button>
-          <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm" />
+          <UserAvatar profile={{ ...authProfile, avatar_url: profileDraft.avatar_url || authProfile?.avatar_url }} size="sm" />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Portal do hóspede</p>
             <h2 className="truncate text-lg font-black">{menu.find(([key]) => key === view)?.[1] || 'Dashboard'}</h2>
@@ -7111,9 +7387,13 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
         </header>
         <aside className="hidden border-b border-ink/10 bg-white p-3 sm:p-4 lg:block lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-3 lg:block">
-            <div>
-              <h2 className="text-xl font-black">Portal do hóspede</h2>
-              <p className="mt-1 text-xs font-semibold text-ink/55">{authProfile?.email}</p>
+            <div className="flex min-w-0 items-center gap-3">
+              <UserAvatar profile={{ ...authProfile, avatar_url: profileDraft.avatar_url || authProfile?.avatar_url }} size="md" />
+              <div className="min-w-0">
+                <h2 className="text-xl font-black">Portal do hóspede</h2>
+                <p className="truncate text-sm font-black">{authProfile?.full_name || 'Hóspede'}</p>
+                <p className="mt-1 truncate text-xs font-semibold text-ink/55">{authProfile?.email}</p>
+              </div>
             </div>
             <Button type="button" variant="outline" onClick={onClose} className="lg:hidden">
               <X size={18} />
@@ -7238,6 +7518,13 @@ function ClientPortal({ authProfile, reservations, properties, onUpdateProfile, 
             <div className="grid gap-4">
               <h3 className="text-2xl font-black">{view === 'profile' ? 'Dados pessoais' : 'Configurações'}</h3>
               <form className="grid gap-4 rounded-md bg-white p-4 shadow-sm" onSubmit={submitProfile}>
+                <ProfilePhotoField
+                  value={profileDraft.avatar_url}
+                  userId={authProfile?.id}
+                  name={profileDraft.full_name || authProfile?.full_name}
+                  email={authProfile?.email}
+                  onChange={(avatar_url) => setProfileDraft((current) => ({ ...current, avatar_url }))}
+                />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Nome completo">
                     <TextInput
@@ -7556,6 +7843,7 @@ function AdminPanel({
   setSuggestions,
   adminLogs,
   authProfile,
+  onUpdateProfile,
   onSignOut,
   addAdminLog,
   createManualReservation,
@@ -7609,6 +7897,7 @@ function AdminPanel({
       full_name: authProfile?.full_name || 'Administrador',
       email: authProfile?.email || adminEmail,
       phone: authProfile?.phone || '',
+      avatar_url: authProfile?.avatar_url || '',
       whatsapp: fallbackOwnerWhatsapp,
       role: normalizeRole(authProfile?.role) || 'proprietario',
     }),
@@ -7728,6 +8017,17 @@ function AdminPanel({
     const nextView = storedView || initialView || 'dashboard';
     setAdminView((current) => (current === nextView ? current : nextView));
   }, [initialView]);
+
+  useEffect(() => {
+    setAdminDetails((current) => ({
+      ...current,
+      full_name: current.full_name || authProfile?.full_name || 'Administrador',
+      email: authProfile?.email || current.email || adminEmail,
+      phone: current.phone || authProfile?.phone || '',
+      avatar_url: authProfile?.avatar_url || current.avatar_url || '',
+      role: normalizeRole(current.role || authProfile?.role) || 'proprietario',
+    }));
+  }, [authProfile?.id, authProfile?.avatar_url, authProfile?.full_name, authProfile?.phone, authProfile?.email, authProfile?.role]);
 
   function changeAdminView(nextView) {
     setAdminView(nextView);
@@ -7954,12 +8254,23 @@ function AdminPanel({
     setAdminDetails(normalizedDetails);
     writeLocalData('adminDetails', normalizedDetails);
 
-    if (hasSupabaseConfig && adminSession?.user?.id) {
+    if (onUpdateProfile) {
+      const saved = await onUpdateProfile({
+        full_name: normalizedDetails.full_name,
+        phone: normalizedDetails.phone,
+        avatar_url: normalizedDetails.avatar_url || '',
+      });
+      if (saved === false) {
+        setAdminNotice('Nao foi possivel salvar os dados do perfil agora.');
+        return;
+      }
+    } else if (hasSupabaseConfig && adminSession?.user?.id) {
       await supabase
         .from('profiles')
         .update({
           full_name: normalizedDetails.full_name,
           phone: normalizedDetails.phone,
+          avatar_url: normalizedDetails.avatar_url || null,
         })
         .eq('id', adminSession.user.id);
     }
@@ -8542,6 +8853,7 @@ function AdminPanel({
         onClose={() => setMobileMenuOpen(false)}
         title="Painel proprietário"
         subtitle={adminDetails.email || authProfile?.email || adminEmail}
+        avatarProfile={{ ...authProfile, avatar_url: adminDetails.avatar_url || authProfile?.avatar_url }}
         menu={adminMenu}
         activeKey={adminView}
         onChange={changeAdminView}
@@ -8555,7 +8867,7 @@ function AdminPanel({
             <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-white/10 lg:hidden" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu">
               <Menu size={20} />
             </button>
-            <BrandLogo variant="mark" className="h-9 w-9 shrink-0 rounded-lg shadow-sm lg:hidden" />
+            <UserAvatar profile={{ ...authProfile, avatar_url: adminDetails.avatar_url || authProfile?.avatar_url }} size="sm" className="lg:hidden" />
             <div className="min-w-0">
               <h2 className="truncate text-lg font-black sm:text-2xl">{activeAdminMenuLabel}</h2>
               <p className="truncate text-xs text-white/75 sm:text-sm">{adminDetails.email || authProfile?.email || adminEmail}</p>
@@ -8680,10 +8992,13 @@ function AdminPanel({
         ) : (
           <div className="panel-mobile-flow grid min-h-0 flex-1 gap-3 overflow-auto p-3 sm:gap-5 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start lg:p-5">
             <aside className="hidden h-fit rounded-md bg-white p-3 shadow-sm lg:sticky lg:top-0 lg:block">
-              <div className="mb-3 rounded-md bg-[#f4f8ff] p-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Painel</p>
-                <p className="mt-1 text-sm font-black">{adminDetails.full_name || authProfile?.full_name || 'Administrador'}</p>
-                <p className="mt-1 truncate text-xs font-semibold text-ink/55">{adminDetails.email || authProfile?.email || adminEmail}</p>
+              <div className="mb-3 flex items-center gap-3 rounded-md bg-[#f4f8ff] p-3">
+                <UserAvatar profile={{ ...authProfile, avatar_url: adminDetails.avatar_url || authProfile?.avatar_url }} size="md" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-ink/50">Painel</p>
+                  <p className="mt-1 truncate text-sm font-black">{adminDetails.full_name || authProfile?.full_name || 'Administrador'}</p>
+                  <p className="mt-1 truncate text-xs font-semibold text-ink/55">{adminDetails.email || authProfile?.email || adminEmail}</p>
+                </div>
               </div>
               <nav className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
                 {adminMenu.map(([key, label, icon, badgeCount]) => (
@@ -9750,6 +10065,13 @@ function AdminPanel({
                       Atualize os dados exibidos no painel e no seu perfil.
                     </p>
                   </div>
+                  <ProfilePhotoField
+                    value={adminDetails.avatar_url || ''}
+                    userId={authProfile?.id}
+                    name={adminDetails.full_name || authProfile?.full_name}
+                    email={adminDetails.email || authProfile?.email}
+                    onChange={(avatar_url) => setAdminDetails((current) => ({ ...current, avatar_url }))}
+                  />
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Nome">
                       <TextInput

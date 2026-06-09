@@ -52,6 +52,10 @@ function buildDbError(table: string, error: { message?: string; code?: string; d
   };
 }
 
+function isMissingStorageBucketError(error: { message?: string; statusCode?: string | number } | null | undefined) {
+  return /bucket.*not found|not found/i.test(error?.message || '') || String(error?.statusCode || '') === '404';
+}
+
 async function deleteRows(
   req: Request,
   query: PromiseLike<{ error: { message?: string; code?: string; details?: string } | null }>,
@@ -264,6 +268,20 @@ Deno.serve(async (req) => {
         'properties',
       );
       if (propertiesDeleteError) return propertiesDeleteError;
+    }
+
+    const { data: avatarFiles, error: avatarListError } = await adminClient.storage
+      .from('profile-avatars')
+      .list(userId, { limit: 100 });
+    if (avatarListError && !isMissingStorageBucketError(avatarListError)) {
+      return jsonError(req, 'Erro interno ao carregar foto do perfil.', 500, 'avatar_lookup_error', avatarListError.message);
+    }
+    const avatarPaths = (avatarFiles || []).map((file) => `${userId}/${file.name}`).filter(Boolean);
+    if (avatarPaths.length) {
+      const { error: avatarDeleteError } = await adminClient.storage.from('profile-avatars').remove(avatarPaths);
+      if (avatarDeleteError && !isMissingStorageBucketError(avatarDeleteError)) {
+        return jsonError(req, 'Erro interno ao remover foto do perfil.', 500, 'avatar_storage_delete_error', avatarDeleteError.message);
+      }
     }
 
     const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(userId);
