@@ -15,6 +15,8 @@ import {
   CardTitle
 } from "@hospedex/ui";
 
+import { ModalCasa, type CasaGerenciamento } from "./modal-casa";
+
 /**
  * Cards operacionais do modulo de gerenciamento.
  *
@@ -22,24 +24,30 @@ import {
  * reais. Nenhuma regra de negocio, banco ou persistencia e alterada aqui.
  */
 
-type TipoEntidade = "casa" | "local";
 type TipoModal = "visualizar" | "editar";
 
-type EntidadeGerenciamento = {
+type LocalGerenciamento = {
   id: string;
-  tipo: TipoEntidade;
+  tipo: "local";
   nome: string;
   descricao: string;
   status: string;
   destaque: string;
 };
 
+type EntidadeGerenciamento = LocalGerenciamento | (CasaGerenciamento & { tipo: "casa" });
+
 type ModalAtiva = {
   entidade: EntidadeGerenciamento;
   tipo: TipoModal;
 } | null;
 
-const casas: EntidadeGerenciamento[] = [
+type ModalCasaAtiva = {
+  casa?: CasaGerenciamento;
+  modo: "criar" | "editar";
+} | null;
+
+const casas: Array<CasaGerenciamento & { tipo: "casa" }> = [
   {
     id: "casa-principal",
     tipo: "casa",
@@ -79,6 +87,7 @@ const locais: EntidadeGerenciamento[] = [
 
 export function ManagementActionCards() {
   const [modalAtiva, setModalAtiva] = useState<ModalAtiva>(null);
+  const [modalCasaAtiva, setModalCasaAtiva] = useState<ModalCasaAtiva>(null);
   const entidade = modalAtiva?.entidade;
   const estaEditando = modalAtiva?.tipo === "editar";
 
@@ -94,7 +103,12 @@ export function ManagementActionCards() {
       <div className="grid gap-4 xl:grid-cols-2">
         <ActionSection
           entidades={casas}
-          onEditar={(item) => setModalAtiva({ entidade: item, tipo: "editar" })}
+          onAdicionar={() => setModalCasaAtiva({ modo: "criar" })}
+          onEditar={(item) => {
+            if (item.tipo === "casa") {
+              setModalCasaAtiva({ casa: item, modo: "editar" });
+            }
+          }}
           onVisualizar={(item) => setModalAtiva({ entidade: item, tipo: "visualizar" })}
           titulo="Casas"
         />
@@ -116,6 +130,13 @@ export function ManagementActionCards() {
           <ModalConteudo entidade={entidade} estaEditando={estaEditando} />
         </AppModal>
       ) : null}
+
+      <ModalCasa
+        aberta={Boolean(modalCasaAtiva)}
+        aoFechar={() => setModalCasaAtiva(null)}
+        casa={modalCasaAtiva?.casa}
+        modo={modalCasaAtiva?.modo ?? "criar"}
+      />
     </section>
   );
 }
@@ -124,18 +145,20 @@ function ActionSection({
   titulo,
   entidades,
   onVisualizar,
-  onEditar
+  onEditar,
+  onAdicionar
 }: {
   titulo: string;
   entidades: EntidadeGerenciamento[];
   onVisualizar: (entidade: EntidadeGerenciamento) => void;
   onEditar: (entidade: EntidadeGerenciamento) => void;
+  onAdicionar?: () => void;
 }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold tracking-normal">{titulo}</h2>
-        <ActionButton acao="adicionar" size="sm">
+        <ActionButton acao="adicionar" onClick={onAdicionar} size="sm">
           Adicionar
         </ActionButton>
       </div>

@@ -1,12 +1,11 @@
 "use client";
 
-import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
+import { ActionButton } from "../ui/action-button";
 
 /**
  * Modal base da aplicacao com Portal real.
@@ -80,9 +79,14 @@ export function AppModal({
               <p className="mt-1 text-sm text-muted-foreground">{descricao}</p>
             ) : null}
           </div>
-          <Button aria-label="Fechar modal" onClick={aoFechar} size="icon" variant="ghost">
-            <X aria-hidden="true" />
-          </Button>
+          <ActionButton
+            acao="cancelar"
+            aria-label="Fechar modal"
+            mostrarTexto={false}
+            onClick={aoFechar}
+            size="icon"
+            variant="ghost"
+          />
         </header>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
         {rodape ? <footer className="border-t px-5 py-4">{rodape}</footer> : null}
