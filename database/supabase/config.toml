@@ -1,0 +1,27 @@
+project_id = "hospedex-v2-local"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3002"
+additional_redirect_urls = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://localhost:3002"
+]
+
+[storage]
+enabled = true

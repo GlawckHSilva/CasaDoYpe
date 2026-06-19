@@ -1,0 +1,1 @@
+"""Hospedex API package."""

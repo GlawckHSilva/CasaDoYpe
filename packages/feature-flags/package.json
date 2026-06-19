@@ -1,0 +1,19 @@
+{
+  "name": "@hospedex/feature-flags",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hospedex/types": "0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

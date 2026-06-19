@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.next
+.turbo
+dist
+node_modules
+coverage
+__pycache__
+.pytest_cache
+.ruff_cache
+.venv
+*.pyc
+*.pyo
+*.log
+*.tsbuildinfo
+*.egg-info
