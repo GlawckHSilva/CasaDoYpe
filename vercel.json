@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npm run build -w @hospedex/gestao",
+  "installCommand": "npm install",
+  "outputDirectory": "apps/gestao/.next"
+}

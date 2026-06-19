@@ -1,11 +1,8 @@
-.env
-.env.*
-!.env.example
-.next
-.vercel
-.turbo
-dist
 node_modules
+.next
+.turbo
+.vercel
+dist
 coverage
 __pycache__
 .pytest_cache
